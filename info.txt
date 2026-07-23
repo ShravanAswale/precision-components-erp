@@ -1,0 +1,220 @@
+Analyze Existing Frontend Project
+Check current folder structure.
+Identify pages, components, routes, mock data, localStorage usage and existing API calls.
+Keep the existing UI unchanged as much as possible.
+Create Full-Stack Project Structure
+frontend/ existing React + Vite application.
+backend/ Node.js + Express server.
+Backend folders: config, models, controllers, routes, middleware, services, utils, validators.
+Environment variables and database configuration.
+Authentication & Authorization
+Database-based login.
+Password hashing.
+JWT authentication.
+Admin and Operator roles.
+Protected frontend routes.
+Backend role-based access middleware.
+Login persistence and logout.
+Users Management
+Add user.
+View users.
+Edit user.
+Delete/deactivate user.
+Assign role.
+Reset/change password.
+Operators Management
+Add operator.
+View operators.
+Edit operator.
+Delete/deactivate operator.
+Operator details used in Production and PDIR.
+Machines Management
+Add machine.
+View machines.
+Edit machine.
+Delete/deactivate machine.
+Machine status management.
+Components / Parts Management
+Add component.
+Part Name.
+Part Number.
+Default Cycle Time if required.
+Edit component.
+Delete/deactivate component.
+Use component data in Production and PDIR forms.
+Shift Management
+Add shift.
+Shift name.
+Start time.
+End time.
+Edit shift.
+Delete/deactivate shift.
+Production Entry Module
+Create production entry.
+Logged-in Operator.
+Date.
+Shift.
+Machine.
+OPN / Operation Number.
+Part Name.
+Part Number.
+Cycle Time.
+Machine Run Time.
+Target Production.
+Actual Production.
+Quantity Rejected.
+Production Grade calculation.
+Edit entry.
+Delete entry.
+Production history/list.
+Admin can view all entries.
+Operator access according to role requirements.
+PDIR – Rejection / Final Verification Module
+Add PDIR button/menu below New Entry.
+Create PDIR form.
+Part Name.
+Part Number.
+Checking Operator Name.
+Packing Operator Name.
+Number of Quantity Checked.
+Number of Rejections.
+Reason of Rejection.
+Remarks.
+Save PDIR record.
+View PDIR records.
+Edit/Delete PDIR records.
+Filter PDIR records.
+Rejection Reason Management
+Create standard rejection reasons.
+Add/Edit/Delete reasons.
+Allow multiple defect reasons for one component/product.
+Store rejected quantity against each reason.
+Connect rejection reasons with PDIR records.
+This structure will allow accurate defect analytics.
+Gage Management – Replace Challans
+Remove Challans module.
+Add Gage Management.
+Add/Edit/Delete gage.
+Gage Name/ID.
+Gage Type/details if required.
+New/Purchase/Start Date.
+Repair/Calibration Reminder Date.
+Current Status.
+Available.
+Due Soon.
+Due for Repair.
+Sent for Repair.
+Awaiting Return.
+Received.
+Sent Date.
+Repair Factory/Vendor details.
+Expected Return Date if available.
+Actual Received Date.
+Remarks.
+Manual Mark as Sent for Repair.
+Manual Mark as Received.
+Remove active reminder after received.
+Maintain complete gage repair/history records.
+Dashboard Integration
+Total Production from database.
+Total Rejections from database.
+Average Efficiency calculation.
+Active Machines.
+Weekly Production vs Rejection chart.
+Recent Production Entries.
+Component-wise rejection analysis.
+Product/Component → Defect Reasons → Rejected Quantity.
+Highest rejection reason for each component.
+Most defective component/product.
+Overall highest defect reason.
+PDIR statistics.
+Gages due for repair.
+Gages sent for repair.
+Gages awaiting return.
+Reports Module
+Filter by Operator.
+Filter by Component/Product.
+Filter by Machine.
+Filter by Shift.
+Filter by Date Range.
+Production Summary.
+Rejection Report.
+PDIR Report.
+Component-wise Defect Report.
+Rejection Reason-wise Report.
+Highest Defect Reason per Component.
+Monthly Production/Target/Rejection charts.
+Search Production Entries.
+Print Report.
+Frontend API Integration
+Create central API configuration.
+Authentication API integration.
+Replace all mock/hardcoded data.
+Connect every form to backend.
+Connect every table to backend.
+Connect Edit/Delete buttons.
+Connect dropdowns to database data.
+Loading states.
+Error handling.
+Success messages.
+Token handling.
+Backend Development
+MongoDB connection.
+Models/Schemas.
+Controllers.
+Routes.
+Authentication middleware.
+Role middleware.
+Validation.
+Central error handling.
+Dashboard aggregation APIs.
+Reports aggregation APIs.
+Gage reminder logic.
+Database Models Required
+User
+Operator
+Machine
+Component
+Shift
+ProductionEntry
+PDIR
+RejectionReason
+Gage
+GageHistory
+Testing & Final Verification
+Test Admin login.
+Test Operator login.
+Test role permissions.
+Test every CRUD operation.
+Test Production calculations.
+Test PDIR rejection data.
+Test component-wise defect analytics.
+Test highest rejection reason calculation.
+Test dashboard values/charts.
+Test reports and filters.
+Test Gage reminder lifecycle.
+Test Sent → Awaiting Return → Received flow.
+Remove all remaining mock data.
+Final full ERP workflow testing.
+
+Next step: Share the current project folder structure. Then I will give you the exact final folder structure and we will start implementation module-by-module without randomly creating files.
+
+
+
+
+
+##############################
+
+
+
+
+part wise 
+operator wiser
+type of rejection 
+
+
+
+gages :
+
+
+purchase date and issue datae position swap 

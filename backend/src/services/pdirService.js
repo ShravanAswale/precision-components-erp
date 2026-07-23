@@ -1,14 +1,15 @@
-import PDIR from "../models/PDIR.js";
+import PDIR from "../models/PDIR.js"; 
 import ApiError from "../utils/ApiError.js";
 
 // Create PDIR
 export const createPdir = async (data, createdBy) => {
-  const pdir = await PDIR.create({
+  const pdir = await Pdir.create({
     ...data,
     createdBy,
   });
 
-  return await PDIR.findById(pdir._id)
+  // Return populated PDIR
+  return await Pdir.findById(pdir._id)
     .populate("component", "componentName partNumber")
     .populate("production")
     .populate("checkingOperator", "name operatorId")
@@ -18,7 +19,7 @@ export const createPdir = async (data, createdBy) => {
 
 // Get All PDIR Records
 export const getPdirs = async () => {
-  const pdirs = await PDIR.find()
+  const pdirs = await Pdir.find()
     .populate("component", "componentName partNumber")
     .populate("production")
     .populate("checkingOperator", "name operatorId")
@@ -34,7 +35,7 @@ export const getPdirs = async () => {
 
 // Get PDIR By ID
 export const getPdirById = async (id) => {
-  const pdir = await PDIR.findById(id)
+  const pdir = await Pdir.findById(id)
     .populate("component", "componentName partNumber")
     .populate("production")
     .populate("checkingOperator", "name operatorId")
@@ -50,7 +51,7 @@ export const getPdirById = async (id) => {
 
 // Update PDIR
 export const updatePdir = async (id, data) => {
-  const pdir = await PDIR.findById(id);
+  const pdir = await Pdir.findById(id);
 
   if (!pdir) {
     throw new ApiError(404, "PDIR not found");
@@ -60,7 +61,8 @@ export const updatePdir = async (id, data) => {
 
   await pdir.save();
 
-  return await PDIR.findById(pdir._id)
+  // Return updated and populated PDIR
+  return await Pdir.findById(pdir._id)
     .populate("component", "componentName partNumber")
     .populate("production")
     .populate("checkingOperator", "name operatorId")
@@ -70,7 +72,7 @@ export const updatePdir = async (id, data) => {
 
 // Delete PDIR
 export const deletePdir = async (id) => {
-  const pdir = await PDIR.findById(id);
+  const pdir = await Pdir.findById(id);
 
   if (!pdir) {
     throw new ApiError(404, "PDIR not found");

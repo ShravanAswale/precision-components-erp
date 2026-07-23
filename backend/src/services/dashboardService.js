@@ -1,6 +1,6 @@
 import Production from "../models/Production.js";
 import Machine from "../models/Machine.js";
-import Pdir from "../models/Pdir.js";
+import PDIR from "../models/PDIR.js"; 
 import Gage from "../models/Gage.js";
 
 import { generateGageNotifications } from "./gageNotificationService.js";

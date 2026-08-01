@@ -89,7 +89,7 @@ export const getReports = async (query) => {
   // 2. FETCH ALL PDIR DATA WITH PRODUCTION RELATION
   // =========================================================
 
-  let pdir = await Pdir.find()
+  let pdir = await PDIR.find()
     .populate({
       path: "production",
       populate: [

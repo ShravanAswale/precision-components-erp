@@ -24,7 +24,7 @@ export default function AddProduction() {
     remarks: ''
   });
 
-  // 1. Rejection types list added after formData state
+  // Rejection types list
   const rejectionTypes = [
     "TOTAL LENGTH UNDERSIZE",
     "TOTAL LENGTH OVERSIZE",
@@ -128,7 +128,21 @@ export default function AddProduction() {
       return;
     }
 
-    setFormData(prev => ({ ...prev, [name]: value }));
+    const updatedData = {
+      ...formData,
+      [name]: value,
+    };
+    const cycleTime = Number(updatedData.cycleTime);
+    const machineRunTime = Number(updatedData.machineRunTime);
+
+    // Auto Calculate Target Production
+    if (cycleTime > 0 && machineRunTime > 0) {
+      updatedData.targetProd = Math.floor((machineRunTime * 60) / cycleTime);
+    } else {
+      updatedData.targetProd = "";
+    }
+
+    setFormData(updatedData);
   };
 
   const handleSubmit = async (e) => {
@@ -147,7 +161,7 @@ export default function AddProduction() {
         targetProduction: Number(formData.targetProd),
         actualProduction: Number(formData.actualProd),
         rejectedQty: Number(formData.qtyRejected),
-        rejectionReason: formData.rejectionReason, // 2. Added rejectionReason field
+        rejectionReason: formData.rejectionReason,
         remarks: formData.remarks
       });
 
@@ -263,7 +277,13 @@ export default function AddProduction() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Target Prod</label>
-            <input type="number" name="targetProd" value={formData.targetProd} onChange={handleChange} required className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+            <input
+              type="number"
+              name="targetProd"
+              value={formData.targetProd}
+              readOnly
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg bg-gray-100 cursor-not-allowed"
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Actual Prod</label>
@@ -292,7 +312,6 @@ export default function AddProduction() {
           </div>
           {parseInt(formData.qtyRejected) > 0 && (
             <div>
-              {/* 3. Replaced text input with select dropdown for rejectionReason */}
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Type of Rejection <span className="text-red-500">*</span>
               </label>

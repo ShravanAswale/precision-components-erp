@@ -1,4 +1,5 @@
 import Gage from "../models/Gage.js";
+import Notification from "../models/Notification.js";
 import { createNotification } from "./notificationService.js";
 
 export const generateGageNotifications = async () => {
@@ -19,14 +20,11 @@ export const generateGageNotifications = async () => {
       console.log("--------------------------------------");
       console.log("Checking Gage:", gage.gageName);
       console.log("Gage Number:", gage.gageNumber);
-      console.log("Repair Reminder:", gage.repairReminderDate);
-      console.log("Calibration Due:", gage.calibrationDueDate);
-      console.log("Sent For Repair:", gage.sentForRepair);
       console.log("--------------------------------------");
 
-      // ==========================================
-      // Calibration Notifications
-      // ==========================================
+      // ==========================
+      // CALIBRATION
+      // ==========================
 
       if (gage.repairReminderDate && !gage.sentForRepair) {
         const reminderDate = new Date(gage.repairReminderDate);
@@ -34,9 +32,6 @@ export const generateGageNotifications = async () => {
 
         reminderDate.setHours(0, 0, 0, 0);
         dueDate.setHours(0, 0, 0, 0);
-
-        console.log("Reminder Date:", reminderDate);
-        console.log("Due Date:", dueDate);
 
         if (
           !isNaN(reminderDate.getTime()) &&
@@ -68,30 +63,35 @@ export const generateGageNotifications = async () => {
             priority = "Critical";
           }
 
-          console.log("Creating Notification...");
-          console.log("Title:", title);
-
-          const notification = await createNotification({
-            type: "Calibration",
-            title,
-            message,
-            priority,
+          const exists = await Notification.findOne({
             relatedId: gage._id,
             relatedModel: "Gage",
-            dueDate: gage.calibrationDueDate,
-            createdBy: gage.createdBy,
+            title,
+            isClosed: false,
           });
 
-          console.log("Notification Saved:");
-          console.log(notification);
-        } else {
-          console.log("Calibration condition not satisfied.");
+          if (!exists) {
+            await createNotification({
+              type: "Calibration",
+              title,
+              message,
+              priority,
+              relatedId: gage._id,
+              relatedModel: "Gage",
+              dueDate: gage.calibrationDueDate,
+              createdBy: gage.createdBy,
+            });
+
+            console.log("Calibration notification created.");
+          } else {
+            console.log("Calibration notification already exists.");
+          }
         }
       }
 
-      // ==========================================
-      // Repair Notifications
-      // ==========================================
+      // ==========================
+      // REPAIR
+      // ==========================
 
       if (
         gage.sentForRepair &&
@@ -120,20 +120,29 @@ export const generateGageNotifications = async () => {
             priority = "Critical";
           }
 
-          console.log("Creating Repair Notification...");
-
-          const notification = await createNotification({
-            type: "Repair",
-            title,
-            message,
-            priority,
+          const exists = await Notification.findOne({
             relatedId: gage._id,
             relatedModel: "Gage",
-            dueDate: gage.expectedReturnDate,
-            createdBy: gage.createdBy,
+            title,
+            isClosed: false,
           });
 
-          console.log(notification);
+          if (!exists) {
+            await createNotification({
+              type: "Repair",
+              title,
+              message,
+              priority,
+              relatedId: gage._id,
+              relatedModel: "Gage",
+              dueDate: gage.expectedReturnDate,
+              createdBy: gage.createdBy,
+            });
+
+            console.log("Repair notification created.");
+          } else {
+            console.log("Repair notification already exists.");
+          }
         }
       }
     } catch (error) {

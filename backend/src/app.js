@@ -9,22 +9,33 @@ dotenv.config();
 
 const app = express();
 
-app.use(cors());
+// CORS Configuration
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "https://precision-components-erp.onrender.com",
+    ],
+    credentials: true,
+  })
+);
 
+// Body Parser
 app.use(express.json());
-
 app.use(express.urlencoded({ extended: true }));
 
+// Health Check
 app.get("/", (req, res) => {
-  res.json({
+  res.status(200).json({
     success: true,
     message: "Precision Components ERP API is running",
   });
 });
 
+// API Routes
 app.use("/api/v1", routes);
 
-// Global Error Middleware (Always Last)
+// Global Error Handler (Keep Last)
 app.use(errorMiddleware);
 
 export default app;

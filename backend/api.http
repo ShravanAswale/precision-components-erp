@@ -1,12 +1,7 @@
-### Register Admin
-POST http://localhost:5000/api/v1/auth/register
+POST http://localhost:5000/api/v1/auth/login
 Content-Type: application/json
 
 {
-  "fullName": "Admin",
   "email": "admin@precision.com",
-  "password": "Admin@123",
-  "phone": "9876543210",
-  "employeeId": "EMP001",
-  "role": "admin"
+  "password": "Admin@123"
 }

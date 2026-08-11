@@ -33,6 +33,7 @@ import {
   Info,
   X,
   Eye,
+  Wrench,
 } from "lucide-react";
 import api from "../../services/api";
 
@@ -74,6 +75,8 @@ const truncateLabel = (label, max = 12) => {
   return str.length > max ? `${str.slice(0, max - 1)}…` : str;
 };
 
+const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN") : "-");
+
 // ============================================================
 // MAIN COMPONENT
 // ============================================================
@@ -85,6 +88,7 @@ export default function ReportsPage() {
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState("summary");
   const [selectedPart, setSelectedPart] = useState(null);
+  const [detailRecord, setDetailRecord] = useState(null); // { title, sections } for generic modal
 
   // ============================================================
   // FETCH REPORT WHEN SEARCH CHANGES (debounced)
@@ -127,21 +131,232 @@ export default function ReportsPage() {
   const resetSearch = () => setSearch("");
 
   // ============================================================
-  // RAW DATA (from existing /reports response - unchanged shape)
+  // RAW DATA (from /reports response)
   // ============================================================
 
   const summary = reportData?.summary || {};
   const productionData = reportData?.productions || [];
   const pdirData = reportData?.pdirDetailedReport || reportData?.pdir || [];
+
+  // Production-side (independent of PDIR)
+  const partWiseReport = reportData?.partWiseReport || [];
+  const componentWiseProductionDefect =
+    reportData?.componentWiseProductionDefect || [];
+  const productionRejectionReasonWise =
+    reportData?.productionRejectionReasonWise || [];
+  const highestProductionDefectReason =
+    reportData?.highestProductionDefectReason || [];
+
+  // PDIR-side (independent of Production)
   const componentWiseDefect = reportData?.componentWiseDefect || [];
   const rejectionReasonWise = reportData?.rejectionReasonWise || [];
   const highestDefectReason = reportData?.highestDefectReason || [];
-  const partWiseReport = reportData?.partWiseReport || [];
+
   const operatorWiseReport = reportData?.operatorWiseReport || [];
   const monthlyChart = reportData?.monthlyChart || [];
-  // Pre-merged, correctly-keyed Production + PDIR data per part,
-  // returned by the backend (see reportService.js -> partAnalysis).
+
+  // Pre-merged, correctly-keyed Production + PDIR data per part —
+  // production and pdir kept as two separate nested objects.
   const partAnalysis = reportData?.partAnalysis || [];
+
+  // ============================================================
+  // GENERIC ROW -> DETAIL MODAL HELPER
+  // ============================================================
+
+  const openDetail = (title, sections) => setDetailRecord({ title, sections });
+  const closeDetail = () => setDetailRecord(null);
+
+  const openProductionDetail = (entry) => {
+    openDetail(`Production Entry — ${entry.component?.componentName || "-"}`, [
+      {
+        heading: "Batch Info",
+        rows: [
+          ["Date", fmtDate(entry.date)],
+          ["Shift", entry.shift || "-"],
+          ["Operation No", entry.operationNo || "-"],
+          ["Machine", entry.machine?.machineName || "-"],
+          ["Operator", entry.operator?.name || "-"],
+          ["Grade", entry.grade || "-"],
+        ],
+      },
+      {
+        heading: "Part",
+        rows: [
+          ["Component", entry.component?.componentName || "-"],
+          ["Part No", entry.component?.partNumber || "-"],
+        ],
+      },
+      {
+        heading: "Production Output",
+        rows: [
+          ["Cycle Time (s)", entry.cycleTime ?? "-"],
+          ["Machine Run Time", entry.machineRunTime ?? "-"],
+          ["Target Production", entry.targetProduction ?? 0],
+          ["Actual Production", entry.actualProduction ?? 0],
+        ],
+      },
+      {
+        heading: "Production Rejection",
+        danger: toNum(entry.rejectedQty) > 0,
+        rows: [
+          ["Qty Rejected", entry.rejectedQty || 0],
+          ["Rejection Reason", entry.rejectionReason || "-"],
+        ],
+      },
+      {
+        heading: "Other",
+        rows: [
+          ["Remarks", entry.remarks || "-"],
+          ["Created By", entry.createdBy?.fullName || "-"],
+        ],
+      },
+    ]);
+  };
+
+  const openPdirDetail = (entry) => {
+    const production = entry.productionBatch || entry.production;
+    openDetail(`PDIR Entry — ${entry.partName || "-"}`, [
+      {
+        heading: "Part",
+        rows: [
+          ["Part Name", entry.partName || "-"],
+          ["Part Number", entry.partNumber || "-"],
+          ["Inspected On", fmtDate(entry.createdAt)],
+        ],
+      },
+      {
+        heading: "PDIR Rejection (Quality Inspection)",
+        danger: toNum(entry.qtyRejected) > 0,
+        rows: [
+          ["Qty Checked", entry.qtyChecked || 0],
+          ["Qty Rejected", entry.qtyRejected || 0],
+          ["Rejection Reason", entry.rejectionReason || "Unspecified"],
+        ],
+      },
+      {
+        heading: "Operators",
+        rows: [
+          ["Checking Operator", entry.checkingOperator?.name || "-"],
+          ["Packing Operator", entry.packingOperator?.name || "-"],
+        ],
+      },
+      production
+        ? {
+            heading: "Linked Production Batch",
+            rows: [
+              ["Date", fmtDate(production.date)],
+              ["Operation No", production.operationNo || "-"],
+              ["Shift", production.shift || "-"],
+              ["Actual Production", production.actualProduction ?? "-"],
+              [
+                "Production Rejection (separate from PDIR)",
+                `${production.rejectedQty ?? 0} — ${
+                  production.rejectionReason || "-"
+                }`,
+              ],
+            ],
+          }
+        : {
+            heading: "Linked Production Batch",
+            rows: [["Status", "No production batch linked to this PDIR record"]],
+          },
+      {
+        heading: "Other",
+        rows: [
+          ["Remarks", entry.remarks || "-"],
+          ["Created By", entry.createdBy?.fullName || "-"],
+        ],
+      },
+    ]);
+  };
+
+  const openOperatorDetail = (op) => {
+    openDetail(`Operator — ${op.operatorName}`, [
+      {
+        heading: "Identity",
+        rows: [["Operator Code", op.operatorCode || "-"]],
+      },
+      {
+        heading: "Production Performance",
+        rows: [
+          ["Entries", op.totalEntries],
+          ["Target", op.totalTarget],
+          ["Actual Production", op.totalProduction],
+          ["Efficiency", `${op.efficiency}%`],
+        ],
+      },
+      {
+        heading: "Production Rejection",
+        danger: toNum(op.totalRejected) > 0,
+        rows: [
+          ["Qty Rejected (during production)", op.totalRejected],
+          ["Rejection Rate", `${op.rejectionRate}%`],
+        ],
+      },
+      {
+        heading: "Ranking",
+        rows: [["Score (Efficiency − Rejection Rate)", op.rankScore]],
+      },
+    ]);
+  };
+
+  const openComponentProductionDetail = (c) => {
+    openDetail(`Production Defect — ${c.partName}`, [
+      {
+        heading: "Part",
+        rows: [
+          ["Part Name", c.partName || "-"],
+          ["Part Number", c.partNumber || "-"],
+        ],
+      },
+      {
+        heading: "Production Scrap (machining stage)",
+        danger: true,
+        rows: [
+          ["Total Produced", c.totalProduced || 0],
+          ["Total Rejected", c.totalRejected || 0],
+          ["Rejection Rate", `${c.rejectionRate ?? 0}%`],
+          ["Production Entries", c.entries || 0],
+        ],
+      },
+    ]);
+  };
+
+  const openComponentPdirDetail = (c) => {
+    openDetail(`PDIR Defect — ${c.partName || c._id}`, [
+      {
+        heading: "Part",
+        rows: [
+          ["Part Name", c.partName || c._id || "-"],
+          ["Part Number", c.partNumber || "-"],
+        ],
+      },
+      {
+        heading: "PDIR Rejection (quality inspection stage)",
+        danger: true,
+        rows: [
+          ["Total Checked", c.totalChecked || 0],
+          ["Total Rejected", c.totalRejected || 0],
+          ["Rejection Rate", `${c.rejectionRate ?? 0}%`],
+          ["PDIR Entries", c.pdirEntries || 0],
+        ],
+      },
+    ]);
+  };
+
+  const openReasonDetail = (source, item) => {
+    openDetail(`${source} Rejection Reason — ${item.rejectionReason || item._id}`, [
+      {
+        heading: source,
+        danger: true,
+        rows: [
+          ["Reason", item.rejectionReason || item._id || "Unspecified"],
+          ["Occurrences", item.occurrences || 0],
+          ["Total Rejected Qty", item.totalRejected || 0],
+        ],
+      },
+    ]);
+  };
 
   // ============================================================
   // DERIVED: MONTHLY CHART
@@ -172,55 +387,71 @@ export default function ReportsPage() {
   );
 
   // ============================================================
-  // DERIVED: OVERVIEW KPIs
+  // DERIVED: OVERVIEW KPIs — production & PDIR kept fully separate
   // ============================================================
 
   const overviewKpis = useMemo(() => {
     const totalEntries = toNum(summary.totalEntries);
     const totalTarget = toNum(summary.totalTarget);
     const totalProduction = toNum(summary.totalProduction);
+
     const productionRejected = toNum(summary.productionRejected);
+    const productionRejectionRate =
+      summary.productionRejectionRate !== undefined
+        ? toNum(summary.productionRejectionRate)
+        : pct(productionRejected, totalProduction);
+
     const totalQtyChecked = toNum(summary.totalQtyChecked);
     const pdirRejected = toNum(summary.pdirRejected);
-
-    const productionEfficiency = pct(totalProduction, totalTarget);
     const pdirRejectionRate =
       summary.rejectionRate !== undefined
         ? toNum(summary.rejectionRate)
         : pct(pdirRejected, totalQtyChecked);
+
+    const productionEfficiency = pct(totalProduction, totalTarget);
 
     return {
       totalEntries,
       totalTarget,
       totalProduction,
       productionRejected,
+      productionRejectionRate,
       totalQtyChecked,
       pdirRejected,
-      productionEfficiency,
       pdirRejectionRate,
+      productionEfficiency,
     };
   }, [summary]);
 
-  const qualityDonutData = useMemo(() => {
+  const productionQualityDonutData = useMemo(() => {
+    if (!overviewKpis.totalProduction) return [];
+    const good = Math.max(
+      overviewKpis.totalProduction - overviewKpis.productionRejected,
+      0
+    );
+    return [
+      { name: "Good", value: good },
+      { name: "Rejected (Production)", value: overviewKpis.productionRejected },
+    ];
+  }, [overviewKpis]);
+
+  const pdirQualityDonutData = useMemo(() => {
+    if (!overviewKpis.totalQtyChecked) return [];
     const good = Math.max(
       overviewKpis.totalQtyChecked - overviewKpis.pdirRejected,
       0
     );
-    if (!overviewKpis.totalQtyChecked) return [];
     return [
       { name: "Accepted", value: good },
-      { name: "Rejected", value: overviewKpis.pdirRejected },
+      { name: "Rejected (PDIR)", value: overviewKpis.pdirRejected },
     ];
   }, [overviewKpis]);
 
   // ============================================================
   // DERIVED: PART-WISE ANALYSIS
-  // Built entirely from the backend's `partAnalysis` field, which
-  // already joins Production + PDIR by Component ObjectId (falling
-  // back to part number / part name only when no ObjectId link
-  // exists). No re-matching happens on the frontend, so there is
-  // no risk of the wrong PDIR bucket getting matched to the wrong
-  // part and producing an inflated rejection rate.
+  // Built from backend's `partAnalysis`, which keeps production
+  // and pdir rejection as two separate nested objects — no blending
+  // on the frontend either.
   // ============================================================
 
   const enrichedParts = useMemo(
@@ -228,23 +459,26 @@ export default function ReportsPage() {
       partAnalysis.map((p) => ({
         partName: p.partName || "Unknown",
         partNumber: p.partNumber || "-",
-        totalEntries: toNum(p.totalEntries),
-        totalTarget: toNum(p.totalTarget),
-        totalProduction: toNum(p.totalProduction),
-        efficiency: toNum(p.efficiency),
 
-        totalChecked: toNum(p.totalChecked),
-        totalRejected: toNum(p.totalRejected),
-        // Rejection Rate = Rejected / Checked, exactly as returned by
-        // the backend. 0 checked -> 0%, never divided by production.
-        rejectionRate: toNum(p.rejectionRate),
-        pdirEntries: toNum(p.pdirEntries),
+        totalEntries: toNum(p.production?.totalEntries),
+        totalTarget: toNum(p.production?.totalTarget),
+        totalProduction: toNum(p.production?.totalProduction),
+        efficiency: toNum(p.production?.efficiency),
+        productionRejected: toNum(p.production?.totalRejected),
+        productionRejectionRate: toNum(p.production?.rejectionRate),
+        productionMainReason: p.production?.mainReason || null,
+        productionReasons: Array.isArray(p.production?.reasons)
+          ? p.production.reasons
+          : [],
 
-        mainDefectReason: p.mainRejectionReason || null,
-        mainDefectQty: toNum(p.mainRejectionQty),
-        mainDefectPercentage: toNum(p.mainRejectionPercentage),
+        totalChecked: toNum(p.pdir?.totalChecked),
+        pdirRejected: toNum(p.pdir?.totalRejected),
+        pdirRejectionRate: toNum(p.pdir?.rejectionRate),
+        pdirEntries: toNum(p.pdir?.pdirEntries),
+        pdirMainReason: p.pdir?.mainReason || null,
+        pdirReasons: Array.isArray(p.pdir?.reasons) ? p.pdir.reasons : [],
 
-        reasons: Array.isArray(p.reasons) ? p.reasons : [],
+        combinedRejected: toNum(p.combinedRejected),
       })),
     [partAnalysis]
   );
@@ -256,37 +490,38 @@ export default function ReportsPage() {
       (a, b) => b.totalProduction - a.totalProduction
     )[0];
 
-    const mostDefective = [...enrichedParts]
-      .filter((p) => p.totalRejected > 0)
-      .sort((a, b) => b.totalRejected - a.totalRejected)[0];
+    const mostDefectiveProduction = [...enrichedParts]
+      .filter((p) => p.productionRejected > 0)
+      .sort((a, b) => b.productionRejected - a.productionRejected)[0];
 
-    // Only parts with a valid checked quantity are eligible, so a
-    // part with 0 inspections can never appear as "highest rate".
-    const highestRejectionRate = [...enrichedParts]
-      .filter((p) => p.totalChecked > 0)
-      .sort((a, b) => b.rejectionRate - a.rejectionRate)[0];
+    const mostDefectivePdir = [...enrichedParts]
+      .filter((p) => p.pdirRejected > 0)
+      .sort((a, b) => b.pdirRejected - a.pdirRejected)[0];
 
-    // Best performing = high efficiency + low rejection rate,
-    // simple transparent composite score.
     const best = [...enrichedParts]
       .filter((p) => p.totalProduction > 0)
       .sort((a, b) => {
-        const scoreA = a.efficiency - a.rejectionRate;
-        const scoreB = b.efficiency - b.rejectionRate;
+        const scoreA = a.efficiency - a.productionRejectionRate - a.pdirRejectionRate;
+        const scoreB = b.efficiency - b.productionRejectionRate - b.pdirRejectionRate;
         return scoreB - scoreA;
       })[0];
 
-    return { mostProduced, mostDefective, highestRejectionRate, best };
+    return { mostProduced, mostDefectiveProduction, mostDefectivePdir, best };
   }, [enrichedParts]);
 
-  // Ranked "Most Defective Parts" — primarily by Rejection Rate %,
-  // restricted to parts with a valid (non-zero) checked quantity so
-  // the ranking is never skewed by a part with no inspections.
-  const rankedDefectiveParts = useMemo(
+  const rankedProductionDefectiveParts = useMemo(
+    () =>
+      [...enrichedParts]
+        .filter((p) => p.totalProduction > 0)
+        .sort((a, b) => b.productionRejectionRate - a.productionRejectionRate),
+    [enrichedParts]
+  );
+
+  const rankedPdirDefectiveParts = useMemo(
     () =>
       [...enrichedParts]
         .filter((p) => p.totalChecked > 0)
-        .sort((a, b) => b.rejectionRate - a.rejectionRate),
+        .sort((a, b) => b.pdirRejectionRate - a.pdirRejectionRate),
     [enrichedParts]
   );
 
@@ -299,7 +534,7 @@ export default function ReportsPage() {
           fullName: `${p.partName} (${p.partNumber})`,
           name: p.partNumber !== "-" ? p.partNumber : p.partName,
           Production: p.totalProduction,
-          Rejected: p.totalRejected,
+          "Production Rejected": p.productionRejected,
         })),
     [enrichedParts]
   );
@@ -308,15 +543,14 @@ export default function ReportsPage() {
     () =>
       [...enrichedParts]
         .filter((p) => p.totalChecked > 0)
-        .sort((a, b) => b.rejectionRate - a.rejectionRate)
+        .sort((a, b) => b.pdirRejectionRate - a.pdirRejectionRate)
         .slice(0, 10)
         .map((p) => ({
           fullName: `${p.partName} (${p.partNumber})`,
           name: p.partNumber !== "-" ? p.partNumber : p.partName,
-          partNumber: p.partNumber,
           checked: p.totalChecked,
-          rejected: p.totalRejected,
-          "Rejection Rate": p.rejectionRate,
+          rejected: p.pdirRejected,
+          "PDIR Rejection Rate": p.pdirRejectionRate,
         })),
     [enrichedParts]
   );
@@ -339,10 +573,6 @@ export default function ReportsPage() {
 
         const rejectionRate = pct(totalRejected, totalProduction);
 
-        // Transparent composite ranking score:
-        // rewards efficiency, penalizes rejection rate.
-        // Production volume is shown but intentionally NOT part of the
-        // score, so a high-volume operator isn't automatically "best".
         const rankScore =
           Math.round((efficiency - rejectionRate) * 10) / 10;
 
@@ -413,9 +643,6 @@ export default function ReportsPage() {
 
   // ============================================================
   // DERIVED: PDIR CHECKING / PACKING OPERATOR ACTIVITY
-  // Aggregated client-side from pdirDetailedReport / pdir — no new
-  // endpoint needed, as long as checkingOperator / packingOperator
-  // are populated on each PDIR record (see data-notes below).
   // ============================================================
 
   const pdirOperatorActivity = useMemo(() => {
@@ -450,8 +677,6 @@ export default function ReportsPage() {
     return {
       checking: build((e) => e.checkingOperator),
       packing: build((e) => e.packingOperator),
-      hasCheckingData: pdirData.some((e) => e.checkingOperator),
-      hasPackingData: pdirData.some((e) => e.packingOperator),
     };
   }, [pdirData]);
 
@@ -473,6 +698,16 @@ export default function ReportsPage() {
 
     return { totalEntries, totalQtyChecked, totalQtyRejected, rejectionRate };
   }, [pdirData, summary]);
+
+  const productionRejectionTotals = useMemo(() => {
+    const totalEntries = productionData.filter(
+      (e) => toNum(e.rejectedQty) > 0
+    ).length;
+    const totalProduced = toNum(summary.totalProduction);
+    const totalRejected = toNum(summary.productionRejected);
+    const rejectionRate = pct(totalRejected, totalProduced);
+    return { totalEntries, totalProduced, totalRejected, rejectionRate };
+  }, [productionData, summary]);
 
   const pdirHighlights = useMemo(() => {
     const mostInspected = [...componentWiseDefect].sort(
@@ -499,6 +734,22 @@ export default function ReportsPage() {
     };
   }, [componentWiseDefect, rejectionReasonWise]);
 
+  const productionRejectionHighlights = useMemo(() => {
+    const mostDefectivePart = [...componentWiseProductionDefect].sort(
+      (a, b) => toNum(b.totalRejected) - toNum(a.totalRejected)
+    )[0];
+
+    const mostCommonReason = [...productionRejectionReasonWise].sort(
+      (a, b) => toNum(b.occurrences) - toNum(a.occurrences)
+    )[0];
+
+    const highestRejectionQtyReason = [...productionRejectionReasonWise].sort(
+      (a, b) => toNum(b.totalRejected) - toNum(a.totalRejected)
+    )[0];
+
+    return { mostDefectivePart, mostCommonReason, highestRejectionQtyReason };
+  }, [componentWiseProductionDefect, productionRejectionReasonWise]);
+
   const pdirByPartChart = useMemo(
     () =>
       [...componentWiseDefect]
@@ -512,20 +763,17 @@ export default function ReportsPage() {
     [componentWiseDefect]
   );
 
-  // ============================================================
-  // DERIVED: REJECTION / DEFECT ANALYSIS
-  // ============================================================
-
-  const topDefectiveChart = useMemo(
+  const productionDefectByPartChart = useMemo(
     () =>
-      [...componentWiseDefect]
+      [...componentWiseProductionDefect]
         .sort((a, b) => toNum(b.totalRejected) - toNum(a.totalRejected))
         .slice(0, 10)
         .map((c) => ({
           name: c.partNumber || c.partName || c._id || "-",
-          "Rejected Qty": toNum(c.totalRejected),
+          Produced: toNum(c.totalProduced),
+          Rejected: toNum(c.totalRejected),
         })),
-    [componentWiseDefect]
+    [componentWiseProductionDefect]
   );
 
   // ============================================================
@@ -660,11 +908,42 @@ export default function ReportsPage() {
             <KpiCard icon={Factory} title="Total Production Entries" value={overviewKpis.totalEntries} />
             <KpiCard icon={Target} title="Total Target Production" value={overviewKpis.totalTarget} />
             <KpiCard icon={CheckCircle2} title="Total Actual Production" value={overviewKpis.totalProduction} good />
-            <KpiCard icon={AlertTriangle} title="Total Production Rejections" value={overviewKpis.productionRejected} danger />
-            <KpiCard icon={ClipboardCheck} title="Total PDIR Qty Checked" value={overviewKpis.totalQtyChecked} />
-            <KpiCard icon={ShieldAlert} title="Total PDIR Rejections" value={overviewKpis.pdirRejected} danger />
             <KpiCard icon={TrendingUp} title="Production Efficiency" value={`${overviewKpis.productionEfficiency}%`} good={overviewKpis.productionEfficiency >= 85} />
-            <KpiCard icon={TrendingDown} title="PDIR Rejection Rate" value={`${overviewKpis.pdirRejectionRate}%`} danger={overviewKpis.pdirRejectionRate > 5} />
+          </div>
+
+          {/* PRODUCTION REJECTION vs PDIR REJECTION — always shown as two visually distinct groups */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white border-2 border-orange-100 rounded-xl shadow-sm p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <Wrench size={16} className="text-orange-500" />
+                <h3 className="text-sm font-bold text-orange-700 uppercase tracking-wide">
+                  Production Rejection (machining stage)
+                </h3>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <KpiCard icon={AlertTriangle} title="Qty Rejected" value={overviewKpis.productionRejected} danger compact />
+                <KpiCard icon={TrendingDown} title="Rejection Rate" value={`${overviewKpis.productionRejectionRate}%`} danger={overviewKpis.productionRejectionRate > 5} compact />
+              </div>
+              <p className="text-xs text-gray-500 mt-3">
+                Rejected ÷ Actual Production — pieces scrapped on the machine before inspection.
+              </p>
+            </div>
+
+            <div className="bg-white border-2 border-red-100 rounded-xl shadow-sm p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <ShieldAlert size={16} className="text-red-500" />
+                <h3 className="text-sm font-bold text-red-700 uppercase tracking-wide">
+                  PDIR Rejection (quality inspection stage)
+                </h3>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <KpiCard icon={ClipboardCheck} title="Qty Checked" value={overviewKpis.totalQtyChecked} compact />
+                <KpiCard icon={AlertTriangle} title="Qty Rejected" value={overviewKpis.pdirRejected} danger compact />
+              </div>
+              <p className="text-xs text-gray-500 mt-3">
+                Rejected ÷ Qty Checked — pieces rejected during post-production dispatch inspection. Rate: {overviewKpis.pdirRejectionRate}%
+              </p>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -674,7 +953,7 @@ export default function ReportsPage() {
                 Monthly Production Performance
               </h2>
               <p className="text-sm text-gray-500 mb-6">
-                Target vs actual production vs rejection, by month
+                Target vs actual production vs production rejection, by month
               </p>
 
               {monthlyChartData.length > 0 ? (
@@ -688,7 +967,7 @@ export default function ReportsPage() {
                       <Legend />
                       <Bar dataKey="targetProduction" name="Target" fill="#94a3b8" radius={[5, 5, 0, 0]} />
                       <Bar dataKey="actualProduction" name="Production" fill="#0d9488" radius={[5, 5, 0, 0]} />
-                      <Bar dataKey="rejectedQty" name="Rejection" fill="#ef4444" radius={[5, 5, 0, 0]} />
+                      <Bar dataKey="rejectedQty" name="Production Rejection" fill="#f59e0b" radius={[5, 5, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -697,21 +976,21 @@ export default function ReportsPage() {
               )}
             </div>
 
-            {/* QUALITY DONUT */}
+            {/* QUALITY DONUT (PDIR) */}
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
               <h2 className="text-lg font-semibold text-gray-800">
-                Overall Quality Performance
+                PDIR Quality Performance
               </h2>
               <p className="text-sm text-gray-500 mb-4">
-                PDIR accepted vs rejected quantity
+                Accepted vs rejected quantity at inspection
               </p>
 
-              {qualityDonutData.length > 0 ? (
+              {pdirQualityDonutData.length > 0 ? (
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
-                        data={qualityDonutData}
+                        data={pdirQualityDonutData}
                         dataKey="value"
                         nameKey="name"
                         innerRadius={55}
@@ -738,12 +1017,16 @@ export default function ReportsPage() {
       {!loading && !error && activeTab === "production" && (
         <ReportTable
           title="Detailed Production Report"
-          headers={["Date", "Operator", "Component", "Part No", "Machine", "Shift", "Operation", "Target", "Actual", "Rejected", "Grade"]}
+          headers={["Date", "Operator", "Component", "Part No", "Machine", "Shift", "Operation", "Target", "Actual", "Rejected", "Rejection Reason", "Grade", ""]}
           isEmpty={productionData.length === 0}
         >
           {productionData.map((entry) => (
-            <tr key={entry._id} className="border-t hover:bg-gray-50">
-              <TD>{entry.date ? new Date(entry.date).toLocaleDateString("en-IN") : "-"}</TD>
+            <tr
+              key={entry._id}
+              className="border-t hover:bg-gray-50 cursor-pointer"
+              onClick={() => openProductionDetail(entry)}
+            >
+              <TD>{fmtDate(entry.date)}</TD>
               <TD>{entry.operator?.name || "-"}</TD>
               <TD>{entry.component?.componentName || "-"}</TD>
               <TD>{entry.component?.partNumber || "-"}</TD>
@@ -753,6 +1036,7 @@ export default function ReportsPage() {
               <TD>{entry.targetProduction || 0}</TD>
               <TD>{entry.actualProduction || 0}</TD>
               <TD danger>{entry.rejectedQty || 0}</TD>
+              <TD>{entry.rejectionReason || "-"}</TD>
               <TD>
                 <span
                   style={{
@@ -763,6 +1047,9 @@ export default function ReportsPage() {
                 >
                   Grade {entry.grade || "D"}
                 </span>
+              </TD>
+              <TD>
+                <RowViewButton onClick={() => openProductionDetail(entry)} />
               </TD>
             </tr>
           ))}
@@ -793,22 +1080,22 @@ export default function ReportsPage() {
                 onClick={() => partHighlights.best && setSelectedPart(partHighlights.best)}
               />
               <HighlightCard
-                icon={AlertTriangle}
-                label="Most Defective Part"
-                name={partHighlights.mostDefective?.partName}
-                sub={partHighlights.mostDefective?.partNumber}
-                value={`${partHighlights.mostDefective?.totalRejected ?? 0} rejected`}
-                tone="red"
-                onClick={() => partHighlights.mostDefective && setSelectedPart(partHighlights.mostDefective)}
+                icon={Wrench}
+                label="Most Production Rejects"
+                name={partHighlights.mostDefectiveProduction?.partName}
+                sub={partHighlights.mostDefectiveProduction?.partNumber}
+                value={`${partHighlights.mostDefectiveProduction?.productionRejected ?? 0} rejected`}
+                tone="orange"
+                onClick={() => partHighlights.mostDefectiveProduction && setSelectedPart(partHighlights.mostDefectiveProduction)}
               />
               <HighlightCard
                 icon={ShieldAlert}
-                label="Highest Rejection Rate"
-                name={partHighlights.highestRejectionRate?.partName}
-                sub={partHighlights.highestRejectionRate?.partNumber}
-                value={`${partHighlights.highestRejectionRate?.rejectionRate ?? 0}%`}
+                label="Most PDIR Rejects"
+                name={partHighlights.mostDefectivePdir?.partName}
+                sub={partHighlights.mostDefectivePdir?.partNumber}
+                value={`${partHighlights.mostDefectivePdir?.pdirRejected ?? 0} rejected`}
                 tone="red"
-                onClick={() => partHighlights.highestRejectionRate && setSelectedPart(partHighlights.highestRejectionRate)}
+                onClick={() => partHighlights.mostDefectivePdir && setSelectedPart(partHighlights.mostDefectivePdir)}
               />
             </div>
           ) : (
@@ -816,7 +1103,7 @@ export default function ReportsPage() {
           )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <ChartCard title="Production Quantity by Part" subtitle="Top 10 parts by actual production">
+            <ChartCard title="Production Quantity by Part" subtitle="Top 10 parts — production output vs production-stage rejects">
               {partProductionChart.length > 0 ? (
                 <div style={{ height: 300 }}>
                   <ResponsiveContainer width="100%" height="100%">
@@ -831,13 +1118,12 @@ export default function ReportsPage() {
                       />
                       <YAxis tick={{ fontSize: 11 }} width={36} />
                       <Tooltip
-                        formatter={(value, key) => [value, key]}
                         labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName || ""}
                         contentStyle={{ fontSize: 12, borderRadius: 8 }}
                       />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Bar dataKey="Production" fill="#0d9488" radius={[4, 4, 0, 0]} maxBarSize={26} />
-                      <Bar dataKey="Rejected" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={26} />
+                      <Bar dataKey="Production Rejected" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={26} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -846,7 +1132,7 @@ export default function ReportsPage() {
               )}
             </ChartCard>
 
-            <ChartCard title="Part-wise Rejection Rate Comparison" subtitle="Top 10 parts by rejection rate (Rejected ÷ Checked)">
+            <ChartCard title="Part-wise PDIR Rejection Rate" subtitle="Top 10 parts by PDIR rejection rate (Rejected ÷ Checked)">
               {partRejectionRateChart.length > 0 ? (
                 <div style={{ height: 300 }}>
                   <ResponsiveContainer width="100%" height="100%">
@@ -867,8 +1153,8 @@ export default function ReportsPage() {
                       />
                       <Tooltip
                         contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                        formatter={(value, key, entry) => {
-                          if (key === "Rejection Rate") return [`${value}%`, "Rejection Rate"];
+                        formatter={(value, key) => {
+                          if (key === "PDIR Rejection Rate") return [`${value}%`, "PDIR Rejection Rate"];
                           return [value, key];
                         }}
                         labelFormatter={(_, payload) => {
@@ -876,24 +1162,47 @@ export default function ReportsPage() {
                           return row ? `${row.fullName} — Checked ${row.checked} / Rejected ${row.rejected}` : "";
                         }}
                       />
-                      <Bar dataKey="Rejection Rate" fill="#ef4444" radius={[0, 4, 4, 0]} maxBarSize={22} />
+                      <Bar dataKey="PDIR Rejection Rate" fill="#ef4444" radius={[0, 4, 4, 0]} maxBarSize={22} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               ) : (
-                <EmptyState message="No rejection rate data found." />
+                <EmptyState message="No PDIR rejection rate data found." />
               )}
             </ChartCard>
           </div>
 
           <ReportTable
-            title="Most Defective Parts — Ranked by Rejection Rate"
-            headers={["Rank", "Part Name", "Part Number", "Qty Checked", "Qty Rejected", "Rejection Rate", "Main Rejection Type", ""]}
-            isEmpty={rankedDefectiveParts.length === 0}
+            title="Most Defective Parts — Production Rejection (Ranked by Rate)"
+            headers={["Rank", "Part Name", "Part Number", "Produced", "Rejected", "Rejection Rate", "Main Reason", ""]}
+            isEmpty={rankedProductionDefectiveParts.length === 0}
           >
-            {rankedDefectiveParts.map((p, index) => (
+            {rankedProductionDefectiveParts.map((p, index) => (
               <tr
-                key={`${p.partNumber}-${index}`}
+                key={`prod-${p.partNumber}-${index}`}
+                className="border-t hover:bg-gray-50 cursor-pointer"
+                onClick={() => setSelectedPart(p)}
+              >
+                <TD>#{index + 1}</TD>
+                <TD>{p.partName}</TD>
+                <TD>{p.partNumber}</TD>
+                <TD>{p.totalProduction}</TD>
+                <TD danger>{p.productionRejected}</TD>
+                <TD danger>{p.productionRejectionRate}%</TD>
+                <TD>{p.productionMainReason || "-"}</TD>
+                <TD><RowViewButton onClick={() => setSelectedPart(p)} /></TD>
+              </tr>
+            ))}
+          </ReportTable>
+
+          <ReportTable
+            title="Most Defective Parts — PDIR Rejection (Ranked by Rate)"
+            headers={["Rank", "Part Name", "Part Number", "Checked", "Rejected", "Rejection Rate", "Main Reason", ""]}
+            isEmpty={rankedPdirDefectiveParts.length === 0}
+          >
+            {rankedPdirDefectiveParts.map((p, index) => (
+              <tr
+                key={`pdir-${p.partNumber}-${index}`}
                 className="border-t hover:bg-gray-50 cursor-pointer"
                 onClick={() => setSelectedPart(p)}
               >
@@ -901,28 +1210,17 @@ export default function ReportsPage() {
                 <TD>{p.partName}</TD>
                 <TD>{p.partNumber}</TD>
                 <TD>{p.totalChecked}</TD>
-                <TD danger>{p.totalRejected}</TD>
-                <TD danger>{p.rejectionRate}%</TD>
-                <TD>{p.mainDefectReason || "-"}</TD>
-                <TD>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedPart(p);
-                    }}
-                    className="flex items-center gap-1 text-teal-600 hover:text-teal-800 font-medium"
-                  >
-                    <Eye size={14} />
-                    View
-                  </button>
-                </TD>
+                <TD danger>{p.pdirRejected}</TD>
+                <TD danger>{p.pdirRejectionRate}%</TD>
+                <TD>{p.pdirMainReason || "-"}</TD>
+                <TD><RowViewButton onClick={() => setSelectedPart(p)} /></TD>
               </tr>
             ))}
           </ReportTable>
 
           <ReportTable
             title="Part Analysis — Full Detail"
-            headers={["Part Name", "Part No", "Produced", "Checked", "Rejected", "Rejection Rate", "Main Defect", "Action"]}
+            headers={["Part Name", "Part No", "Produced", "Prod. Rejected", "Checked", "PDIR Rejected", "Action"]}
             isEmpty={enrichedParts.length === 0}
           >
             {enrichedParts.map((p, index) => (
@@ -934,22 +1232,10 @@ export default function ReportsPage() {
                 <TD>{p.partName}</TD>
                 <TD>{p.partNumber}</TD>
                 <TD>{p.totalProduction}</TD>
+                <TD danger>{p.productionRejected}</TD>
                 <TD>{p.totalChecked}</TD>
-                <TD danger>{p.totalRejected}</TD>
-                <TD danger>{p.rejectionRate}%</TD>
-                <TD>{p.mainDefectReason || "-"}</TD>
-                <TD>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedPart(p);
-                    }}
-                    className="flex items-center gap-1 text-teal-600 hover:text-teal-800 font-medium"
-                  >
-                    <Eye size={14} />
-                    View Details
-                  </button>
-                </TD>
+                <TD danger>{p.pdirRejected}</TD>
+                <TD><RowViewButton onClick={() => setSelectedPart(p)} label="View Details" /></TD>
               </tr>
             ))}
           </ReportTable>
@@ -973,6 +1259,7 @@ export default function ReportsPage() {
                 sub={`Score ${operatorHighlights.best?.rankScore}`}
                 value={`${operatorHighlights.best?.efficiency}% eff.`}
                 tone="green"
+                onClick={() => operatorHighlights.best && openOperatorDetail(operatorHighlights.best)}
               />
               <HighlightCard
                 icon={Trophy}
@@ -981,6 +1268,7 @@ export default function ReportsPage() {
                 sub="by actual production"
                 value={`${operatorHighlights.highestProduction?.totalProduction} pcs`}
                 tone="teal"
+                onClick={() => operatorHighlights.highestProduction && openOperatorDetail(operatorHighlights.highestProduction)}
               />
               <HighlightCard
                 icon={CheckCircle2}
@@ -989,6 +1277,7 @@ export default function ReportsPage() {
                 sub="by rejection rate"
                 value={`${operatorHighlights.lowestRejection?.rejectionRate ?? 0}%`}
                 tone="green"
+                onClick={() => operatorHighlights.lowestRejection && openOperatorDetail(operatorHighlights.lowestRejection)}
               />
               <HighlightCard
                 icon={AlertTriangle}
@@ -997,6 +1286,7 @@ export default function ReportsPage() {
                 sub="by rejected quantity"
                 value={`${operatorHighlights.highestRejection?.totalRejected} rejected`}
                 tone="red"
+                onClick={() => operatorHighlights.highestRejection && openOperatorDetail(operatorHighlights.highestRejection)}
               />
             </div>
           ) : (
@@ -1015,7 +1305,7 @@ export default function ReportsPage() {
                       <Tooltip />
                       <Legend />
                       <Bar dataKey="Production" fill="#0d9488" radius={[5, 5, 0, 0]} />
-                      <Bar dataKey="Rejected" fill="#ef4444" radius={[5, 5, 0, 0]} />
+                      <Bar dataKey="Rejected" fill="#f59e0b" radius={[5, 5, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -1047,21 +1337,27 @@ export default function ReportsPage() {
             <div className="flex items-start gap-2 text-xs text-gray-500">
               <Info size={15} className="shrink-0 mt-0.5" />
               <p>
-                Ranking score = Production Efficiency % − Rejection Rate %.
+                Ranking score = Production Efficiency % − Production Rejection Rate %.
                 Production volume is shown for reference but is not part of
                 the score, so an operator is never ranked "best" for
-                production quantity alone.
+                production quantity alone. This does not include PDIR
+                rejections, since those are not attributable to a single
+                production operator.
               </p>
             </div>
           </div>
 
           <ReportTable
             title="Operator Performance Ranking"
-            headers={["Rank", "Operator", "Operator ID", "Entries", "Target", "Production", "Rejected", "Efficiency", "Rejection Rate", "Score"]}
+            headers={["Rank", "Operator", "Operator ID", "Entries", "Target", "Production", "Prod. Rejected", "Efficiency", "Rejection Rate", "Score", ""]}
             isEmpty={operatorRanking.length === 0}
           >
             {operatorRanking.map((op, index) => (
-              <tr key={`${op.operatorCode}-${index}`} className="border-t hover:bg-gray-50">
+              <tr
+                key={`${op.operatorCode}-${index}`}
+                className="border-t hover:bg-gray-50 cursor-pointer"
+                onClick={() => openOperatorDetail(op)}
+              >
                 <TD>#{index + 1}</TD>
                 <TD>{op.operatorName}</TD>
                 <TD>{op.operatorCode}</TD>
@@ -1072,6 +1368,7 @@ export default function ReportsPage() {
                 <TD>{op.efficiency}%</TD>
                 <TD danger>{op.rejectionRate}%</TD>
                 <TD>{op.rankScore}</TD>
+                <TD><RowViewButton onClick={() => openOperatorDetail(op)} /></TD>
               </tr>
             ))}
           </ReportTable>
@@ -1127,7 +1424,7 @@ export default function ReportsPage() {
             <KpiCard icon={ClipboardCheck} title="Total PDIR Entries" value={pdirTotals.totalEntries} />
             <KpiCard icon={Package} title="Total Quantity Checked" value={pdirTotals.totalQtyChecked} />
             <KpiCard icon={AlertTriangle} title="Total Quantity Rejected" value={pdirTotals.totalQtyRejected} danger />
-            <KpiCard icon={TrendingDown} title="Overall Rejection Rate" value={`${pdirTotals.rejectionRate}%`} danger={pdirTotals.rejectionRate > 5} />
+            <KpiCard icon={TrendingDown} title="Overall PDIR Rejection Rate" value={`${pdirTotals.rejectionRate}%`} danger={pdirTotals.rejectionRate > 5} />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -1138,6 +1435,7 @@ export default function ReportsPage() {
               sub={pdirHighlights.mostInspected?.partNumber}
               value={`${pdirHighlights.mostInspected?.totalChecked ?? 0} checked`}
               tone="teal"
+              onClick={() => pdirHighlights.mostInspected && openComponentPdirDetail(pdirHighlights.mostInspected)}
             />
             <HighlightCard
               icon={AlertTriangle}
@@ -1146,6 +1444,7 @@ export default function ReportsPage() {
               sub={pdirHighlights.mostDefectivePart?.partNumber}
               value={`${pdirHighlights.mostDefectivePart?.totalRejected ?? 0} rejected`}
               tone="red"
+              onClick={() => pdirHighlights.mostDefectivePart && openComponentPdirDetail(pdirHighlights.mostDefectivePart)}
             />
             <HighlightCard
               icon={ShieldAlert}
@@ -1154,6 +1453,7 @@ export default function ReportsPage() {
               sub="by occurrences"
               value={`${pdirHighlights.mostCommonReason?.occurrences ?? 0}x`}
               tone="red"
+              onClick={() => pdirHighlights.mostCommonReason && openReasonDetail("PDIR", pdirHighlights.mostCommonReason)}
             />
             <HighlightCard
               icon={TrendingDown}
@@ -1162,6 +1462,7 @@ export default function ReportsPage() {
               sub="by total rejected qty"
               value={`${pdirHighlights.highestRejectionQtyReason?.totalRejected ?? 0}`}
               tone="red"
+              onClick={() => pdirHighlights.highestRejectionQtyReason && openReasonDetail("PDIR", pdirHighlights.highestRejectionQtyReason)}
             />
           </div>
 
@@ -1186,7 +1487,7 @@ export default function ReportsPage() {
               )}
             </ChartCard>
 
-            <ChartCard title="Rejection Reason Distribution" subtitle="Share of rejected quantity by reason">
+            <ChartCard title="PDIR Rejection Reason Distribution" subtitle="Share of rejected quantity by reason">
               {rejectionReasonWise.length > 0 ? (
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1209,23 +1510,28 @@ export default function ReportsPage() {
 
           <ReportTable
             title="Detailed PDIR Report"
-            headers={["Date", "Part", "Part Number", "Production Reference", "Checking Operator", "Packing Operator", "Qty Checked", "Qty Rejected", "Rejection Reason", "Remarks"]}
+            headers={["Date", "Part", "Part Number", "Production Reference", "Checking Operator", "Packing Operator", "Qty Checked", "Qty Rejected", "Rejection Reason", "Remarks", ""]}
             isEmpty={pdirData.length === 0}
           >
-            {pdirData.map((pdir) => {
-              const production = pdir.productionBatch || pdir.production;
+            {pdirData.map((entry) => {
+              const production = entry.productionBatch || entry.production;
               return (
-                <tr key={pdir._id} className="border-t hover:bg-gray-50">
-                  <TD>{pdir.createdAt ? new Date(pdir.createdAt).toLocaleDateString("en-IN") : "-"}</TD>
-                  <TD>{pdir.partName || "-"}</TD>
-                  <TD>{pdir.partNumber || "-"}</TD>
+                <tr
+                  key={entry._id}
+                  className="border-t hover:bg-gray-50 cursor-pointer"
+                  onClick={() => openPdirDetail(entry)}
+                >
+                  <TD>{fmtDate(entry.createdAt)}</TD>
+                  <TD>{entry.partName || "-"}</TD>
+                  <TD>{entry.partNumber || "-"}</TD>
                   <TD>{production?.operationNo || production?._id || "-"}</TD>
-                  <TD>{pdir.checkingOperator?.name || "-"}</TD>
-                  <TD>{pdir.packingOperator?.name || "-"}</TD>
-                  <TD>{pdir.qtyChecked || 0}</TD>
-                  <TD danger>{pdir.qtyRejected || 0}</TD>
-                  <TD>{pdir.rejectionReason || "Unspecified"}</TD>
-                  <TD>{pdir.remarks || "-"}</TD>
+                  <TD>{entry.checkingOperator?.name || "-"}</TD>
+                  <TD>{entry.packingOperator?.name || "-"}</TD>
+                  <TD>{entry.qtyChecked || 0}</TD>
+                  <TD danger>{entry.qtyRejected || 0}</TD>
+                  <TD>{entry.rejectionReason || "Unspecified"}</TD>
+                  <TD>{entry.remarks || "-"}</TD>
+                  <TD><RowViewButton onClick={() => openPdirDetail(entry)} /></TD>
                 </tr>
               );
             })}
@@ -1235,119 +1541,274 @@ export default function ReportsPage() {
 
       {/* ==================== REJECTION ANALYSIS TAB ==================== */}
       {!loading && !error && activeTab === "rejection" && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            <KpiCard icon={AlertTriangle} title="Total Rejections" value={pdirTotals.totalQtyRejected} danger />
-            <KpiCard icon={TrendingDown} title="Overall Rejection Rate" value={`${pdirTotals.rejectionRate}%`} danger={pdirTotals.rejectionRate > 5} />
-            <KpiCard icon={Package} title="Most Defective Part" value={pdirHighlights.mostDefectivePart?.partName || pdirHighlights.mostDefectivePart?._id || "-"} />
-            <KpiCard icon={ShieldAlert} title="Most Common Defect Reason" value={pdirHighlights.mostCommonReason?.rejectionReason || pdirHighlights.mostCommonReason?._id || "-"} />
+        <div className="space-y-8">
+          {/* ---------- PRODUCTION REJECTION SECTION ---------- */}
+          <div className="space-y-5">
+            <div className="flex items-center gap-2 border-b-2 border-orange-200 pb-3">
+              <Wrench size={18} className="text-orange-500" />
+              <h2 className="text-lg font-bold text-orange-700">
+                Production Rejection Analysis
+              </h2>
+              <span className="text-xs text-gray-400 font-normal">
+                (scrapped during machining — logged directly on each production entry)
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              <KpiCard icon={AlertTriangle} title="Total Production Rejected" value={productionRejectionTotals.totalRejected} danger />
+              <KpiCard icon={TrendingDown} title="Production Rejection Rate" value={`${productionRejectionTotals.rejectionRate}%`} danger={productionRejectionTotals.rejectionRate > 5} />
+              <KpiCard icon={Package} title="Most Rejected Part" value={productionRejectionHighlights.mostDefectivePart?.partName || "-"} />
+              <KpiCard icon={ShieldAlert} title="Most Common Reason" value={productionRejectionHighlights.mostCommonReason?.rejectionReason || "-"} />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <ChartCard title="Production Rejection Reason Distribution" subtitle="Share of rejected quantity by reason (machining stage)">
+                {productionRejectionReasonWise.length > 0 ? (
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={productionRejectionReasonWise} dataKey="totalRejected" nameKey="rejectionReason" outerRadius={90}>
+                          {productionRejectionReasonWise.map((_, index) => (
+                            <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <EmptyState message="No production rejection reason data found." />
+                )}
+              </ChartCard>
+
+              <ChartCard title="Top Rejected Parts — Production Stage" subtitle="Ranked by total rejected quantity">
+                {productionDefectByPartChart.length > 0 ? (
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={productionDefectByPartChart} layout="vertical" margin={{ left: 20 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                        <XAxis type="number" />
+                        <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11 }} />
+                        <Tooltip />
+                        <Bar dataKey="Rejected" fill="#f59e0b" radius={[0, 5, 5, 0]}>
+                          <LabelList dataKey="Rejected" position="right" style={{ fontSize: 11 }} />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <EmptyState message="No production defect data found." />
+                )}
+              </ChartCard>
+            </div>
+
+            <ReportTable
+              title="Component-wise Production Defect Report"
+              headers={["Component", "Part No", "Produced", "Rejected", "Rejection Rate", ""]}
+              isEmpty={componentWiseProductionDefect.length === 0}
+            >
+              {componentWiseProductionDefect
+                .slice()
+                .sort((a, b) => toNum(b.totalRejected) - toNum(a.totalRejected))
+                .map((item, index) => (
+                  <tr
+                    key={index}
+                    className="border-t hover:bg-gray-50 cursor-pointer"
+                    onClick={() => openComponentProductionDetail(item)}
+                  >
+                    <TD>{item.partName || "Unknown"}</TD>
+                    <TD>{item.partNumber || "-"}</TD>
+                    <TD>{item.totalProduced || 0}</TD>
+                    <TD danger>{item.totalRejected || 0}</TD>
+                    <TD danger>{item.rejectionRate !== undefined ? `${item.rejectionRate}%` : "-"}</TD>
+                    <TD><RowViewButton onClick={() => openComponentProductionDetail(item)} /></TD>
+                  </tr>
+                ))}
+            </ReportTable>
+
+            <ReportTable
+              title="Production Rejection Reason Details"
+              headers={["Rejection Reason", "Occurrences", "Rejected Quantity", ""]}
+              isEmpty={productionRejectionReasonWise.length === 0}
+            >
+              {productionRejectionReasonWise.map((item, index) => (
+                <tr
+                  key={index}
+                  className="border-t hover:bg-gray-50 cursor-pointer"
+                  onClick={() => openReasonDetail("Production", item)}
+                >
+                  <TD>{item.rejectionReason || item._id || "Unspecified"}</TD>
+                  <TD>{item.occurrences || 0}</TD>
+                  <TD danger>{item.totalRejected || 0}</TD>
+                  <TD><RowViewButton onClick={() => openReasonDetail("Production", item)} /></TD>
+                </tr>
+              ))}
+            </ReportTable>
+
+            <ReportTable
+              title="Highest Production Defect Reason per Component"
+              headers={["Component", "Part Number", "Highest Reason", "Rejected Quantity"]}
+              isEmpty={highestProductionDefectReason.length === 0}
+            >
+              {highestProductionDefectReason.map((item, index) => (
+                <tr key={index} className="border-t hover:bg-gray-50">
+                  <TD>{item._id?.partName || "-"}</TD>
+                  <TD>{item._id?.partNumber || "-"}</TD>
+                  <TD>{item._id?.rejectionReason || "-"}</TD>
+                  <TD danger>{item.totalRejected || 0}</TD>
+                </tr>
+              ))}
+            </ReportTable>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <ChartCard title="Rejection Reason-wise Report" subtitle="Distribution of rejected quantity by rejection reason">
-              {rejectionReasonWise.length > 0 ? (
-                <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={rejectionReasonWise} dataKey="totalRejected" nameKey="rejectionReason" outerRadius={90}>
-                        {rejectionReasonWise.map((_, index) => (
-                          <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <EmptyState message="No rejection reason data found." />
-              )}
-            </ChartCard>
+          {/* ---------- PDIR REJECTION SECTION ---------- */}
+          <div className="space-y-5">
+            <div className="flex items-center gap-2 border-b-2 border-red-200 pb-3">
+              <ShieldAlert size={18} className="text-red-500" />
+              <h2 className="text-lg font-bold text-red-700">
+                PDIR / Quality Inspection Rejection Analysis
+              </h2>
+              <span className="text-xs text-gray-400 font-normal">
+                (rejected during post-production dispatch inspection)
+              </span>
+            </div>
 
-            <ChartCard title="Top Defective Parts" subtitle="Ranked by total rejected quantity">
-              {topDefectiveChart.length > 0 ? (
-                <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={topDefectiveChart} layout="vertical" margin={{ left: 20 }}>
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                      <XAxis type="number" />
-                      <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11 }} />
-                      <Tooltip />
-                      <Bar dataKey="Rejected Qty" fill="#ef4444" radius={[0, 5, 5, 0]}>
-                        <LabelList dataKey="Rejected Qty" position="right" style={{ fontSize: 11 }} />
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <EmptyState message="No defective part data found." />
-              )}
-            </ChartCard>
-          </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              <KpiCard icon={AlertTriangle} title="Total PDIR Rejected" value={pdirTotals.totalQtyRejected} danger />
+              <KpiCard icon={TrendingDown} title="PDIR Rejection Rate" value={`${pdirTotals.rejectionRate}%`} danger={pdirTotals.rejectionRate > 5} />
+              <KpiCard icon={Package} title="Most Defective Part" value={pdirHighlights.mostDefectivePart?.partName || pdirHighlights.mostDefectivePart?._id || "-"} />
+              <KpiCard icon={ShieldAlert} title="Most Common Defect Reason" value={pdirHighlights.mostCommonReason?.rejectionReason || pdirHighlights.mostCommonReason?._id || "-"} />
+            </div>
 
-          <ReportTable
-            title="Component-wise Defect Report"
-            headers={["Component", "Part No", "Qty Checked", "Rejected", "Rejection Rate", "Main Defect Reason"]}
-            isEmpty={componentWiseDefect.length === 0}
-          >
-            {componentWiseDefect
-              .slice()
-              .sort((a, b) => toNum(b.totalRejected) - toNum(a.totalRejected))
-              .map((item, index) => {
-                const matchKey = (item.partNumber || item.partName || item._id || "")
-                  .toString()
-                  .trim()
-                  .toLowerCase();
-                const reasonMatch = highestDefectReason.find((r) => {
-                  const rKey = (r._id?.partNumber || r._id?.partName || "")
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <ChartCard title="PDIR Rejection Reason-wise Report" subtitle="Distribution of rejected quantity by rejection reason">
+                {rejectionReasonWise.length > 0 ? (
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={rejectionReasonWise} dataKey="totalRejected" nameKey="rejectionReason" outerRadius={90}>
+                          {rejectionReasonWise.map((_, index) => (
+                            <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <EmptyState message="No rejection reason data found." />
+                )}
+              </ChartCard>
+
+              <ChartCard title="Top Defective Parts — PDIR Stage" subtitle="Ranked by total rejected quantity">
+                {componentWiseDefect.length > 0 ? (
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={[...componentWiseDefect]
+                          .sort((a, b) => toNum(b.totalRejected) - toNum(a.totalRejected))
+                          .slice(0, 10)
+                          .map((c) => ({ name: c.partNumber || c.partName || c._id || "-", "Rejected Qty": toNum(c.totalRejected) }))}
+                        layout="vertical"
+                        margin={{ left: 20 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                        <XAxis type="number" />
+                        <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11 }} />
+                        <Tooltip />
+                        <Bar dataKey="Rejected Qty" fill="#ef4444" radius={[0, 5, 5, 0]}>
+                          <LabelList dataKey="Rejected Qty" position="right" style={{ fontSize: 11 }} />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <EmptyState message="No defective part data found." />
+                )}
+              </ChartCard>
+            </div>
+
+            <ReportTable
+              title="Component-wise PDIR Defect Report"
+              headers={["Component", "Part No", "Qty Checked", "Rejected", "Rejection Rate", "Main Defect Reason", ""]}
+              isEmpty={componentWiseDefect.length === 0}
+            >
+              {componentWiseDefect
+                .slice()
+                .sort((a, b) => toNum(b.totalRejected) - toNum(a.totalRejected))
+                .map((item, index) => {
+                  const matchKey = (item.partNumber || item.partName || item._id || "")
                     .toString()
                     .trim()
                     .toLowerCase();
-                  return rKey && rKey === matchKey;
-                });
+                  const reasonMatch = highestDefectReason.find((r) => {
+                    const rKey = (r._id?.partNumber || r._id?.partName || "")
+                      .toString()
+                      .trim()
+                      .toLowerCase();
+                    return rKey && rKey === matchKey;
+                  });
 
-                return (
-                  <tr key={index} className="border-t hover:bg-gray-50">
-                    <TD>{item.partName || item._id || "Unknown"}</TD>
-                    <TD>{item.partNumber || "-"}</TD>
-                    <TD>{item.totalChecked || 0}</TD>
-                    <TD danger>{item.totalRejected || 0}</TD>
-                    <TD danger>{item.rejectionRate !== undefined ? `${item.rejectionRate}%` : "-"}</TD>
-                    <TD>{reasonMatch?._id?.rejectionReason || "-"}</TD>
-                  </tr>
-                );
-              })}
-          </ReportTable>
+                  return (
+                    <tr
+                      key={index}
+                      className="border-t hover:bg-gray-50 cursor-pointer"
+                      onClick={() => openComponentPdirDetail(item)}
+                    >
+                      <TD>{item.partName || item._id || "Unknown"}</TD>
+                      <TD>{item.partNumber || "-"}</TD>
+                      <TD>{item.totalChecked || 0}</TD>
+                      <TD danger>{item.totalRejected || 0}</TD>
+                      <TD danger>{item.rejectionRate !== undefined ? `${item.rejectionRate}%` : "-"}</TD>
+                      <TD>{reasonMatch?._id?.rejectionReason || "-"}</TD>
+                      <TD><RowViewButton onClick={() => openComponentPdirDetail(item)} /></TD>
+                    </tr>
+                  );
+                })}
+            </ReportTable>
 
-          <ReportTable
-            title="Rejection Reason Details"
-            headers={["Rejection Reason", "Occurrences", "Rejected Quantity"]}
-            isEmpty={rejectionReasonWise.length === 0}
-          >
-            {rejectionReasonWise.map((item, index) => (
-              <tr key={index} className="border-t hover:bg-gray-50">
-                <TD>{item.rejectionReason || item._id || "Unspecified"}</TD>
-                <TD>{item.occurrences || 0}</TD>
-                <TD danger>{item.totalRejected || 0}</TD>
-              </tr>
-            ))}
-          </ReportTable>
+            <ReportTable
+              title="PDIR Rejection Reason Details"
+              headers={["Rejection Reason", "Occurrences", "Rejected Quantity", ""]}
+              isEmpty={rejectionReasonWise.length === 0}
+            >
+              {rejectionReasonWise.map((item, index) => (
+                <tr
+                  key={index}
+                  className="border-t hover:bg-gray-50 cursor-pointer"
+                  onClick={() => openReasonDetail("PDIR", item)}
+                >
+                  <TD>{item.rejectionReason || item._id || "Unspecified"}</TD>
+                  <TD>{item.occurrences || 0}</TD>
+                  <TD danger>{item.totalRejected || 0}</TD>
+                  <TD><RowViewButton onClick={() => openReasonDetail("PDIR", item)} /></TD>
+                </tr>
+              ))}
+            </ReportTable>
 
-          <ReportTable
-            title="Highest Defect Reason per Component"
-            headers={["Component", "Part Number", "Highest Defect Reason", "Rejected Quantity"]}
-            isEmpty={highestDefectReason.length === 0}
-          >
-            {highestDefectReason.map((item, index) => (
-              <tr key={index} className="border-t hover:bg-gray-50">
-                <TD>{item._id?.partName || "-"}</TD>
-                <TD>{item._id?.partNumber || "-"}</TD>
-                <TD>{item._id?.rejectionReason || "-"}</TD>
-                <TD danger>{item.totalRejected || 0}</TD>
-              </tr>
-            ))}
-          </ReportTable>
+            <ReportTable
+              title="Highest PDIR Defect Reason per Component"
+              headers={["Component", "Part Number", "Highest Defect Reason", "Rejected Quantity"]}
+              isEmpty={highestDefectReason.length === 0}
+            >
+              {highestDefectReason.map((item, index) => (
+                <tr key={index} className="border-t hover:bg-gray-50">
+                  <TD>{item._id?.partName || "-"}</TD>
+                  <TD>{item._id?.partNumber || "-"}</TD>
+                  <TD>{item._id?.rejectionReason || "-"}</TD>
+                  <TD danger>{item.totalRejected || 0}</TD>
+                </tr>
+              ))}
+            </ReportTable>
+          </div>
         </div>
+      )}
+
+      {/* GENERIC ROW DETAIL MODAL */}
+      {detailRecord && (
+        <RowDetailModal record={detailRecord} onClose={closeDetail} />
       )}
     </div>
   );
@@ -1357,12 +1818,12 @@ export default function ReportsPage() {
 // KPI CARD
 // ============================================================
 
-function KpiCard({ icon: Icon, title, value, danger = false, good = false }) {
+function KpiCard({ icon: Icon, title, value, danger = false, good = false, compact = false }) {
   const accent = danger ? "text-red-600" : good ? "text-green-600" : "text-gray-800";
   const iconBg = danger ? "bg-red-50 text-red-500" : good ? "bg-green-50 text-green-600" : "bg-teal-50 text-teal-600";
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
+    <div className={`bg-white border border-gray-200 rounded-xl shadow-sm ${compact ? "p-3" : "p-5"}`}>
       <div className="flex items-center justify-between">
         <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">
           {title}
@@ -1373,7 +1834,7 @@ function KpiCard({ icon: Icon, title, value, danger = false, good = false }) {
           </span>
         )}
       </div>
-      <p className={`text-2xl font-bold mt-2 ${accent}`}>{value}</p>
+      <p className={`${compact ? "text-xl" : "text-2xl"} font-bold mt-2 ${accent}`}>{value}</p>
     </div>
   );
 }
@@ -1387,6 +1848,7 @@ function HighlightCard({ icon: Icon, label, name, sub, value, tone = "teal", onC
     teal: { bg: "bg-teal-50", text: "text-teal-700", icon: "text-teal-600" },
     green: { bg: "bg-green-50", text: "text-green-700", icon: "text-green-600" },
     red: { bg: "bg-red-50", text: "text-red-700", icon: "text-red-600" },
+    orange: { bg: "bg-orange-50", text: "text-orange-700", icon: "text-orange-600" },
   };
   const t = toneMap[tone] || toneMap.teal;
   const clickable = typeof onClick === "function";
@@ -1412,23 +1874,33 @@ function HighlightCard({ icon: Icon, label, name, sub, value, tone = "teal", onC
 }
 
 // ============================================================
-// PART DETAIL MODAL
-// Shows full part info + rejection-type breakdown with percentages,
-// exactly matching the format requested: each reason's rejected
-// quantity and its percentage of that part's total rejections.
+// ROW VIEW BUTTON (small "eye" affordance inside table rows)
 // ============================================================
 
-function PartDetailModal({ part, onClose }) {
-  if (!part) return null;
+function RowViewButton({ onClick, label = "View" }) {
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="flex items-center gap-1 text-teal-600 hover:text-teal-800 font-medium text-sm"
+    >
+      <Eye size={14} />
+      {label}
+    </button>
+  );
+}
 
-  const reasons = Array.isArray(part.reasons) ? part.reasons : [];
-  const mainReason = reasons[0] || null;
+// ============================================================
+// GENERIC ROW DETAIL MODAL
+// Used for Production entries, PDIR entries, Operators, Components,
+// and Rejection Reasons. Takes { title, sections: [{ heading, danger, rows: [[label, value], ...] }] }
+// ============================================================
 
-  const chartData = reasons.slice(0, 8).map((r) => ({
-    name: truncateLabel(r.reason, 14),
-    fullName: r.reason,
-    qty: r.qty,
-  }));
+function RowDetailModal({ record, onClose }) {
+  if (!record) return null;
+  const { title, sections = [] } = record;
 
   return (
     <div
@@ -1436,7 +1908,67 @@ function PartDetailModal({ part, onClose }) {
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-xl shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between px-6 py-5 border-b border-gray-200 sticky top-0 bg-white rounded-t-xl">
+          <h3 className="text-lg font-bold text-gray-800">{title}</h3>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {sections.map((section, i) => (
+            <div
+              key={i}
+              className={`rounded-lg border p-4 ${
+                section.danger ? "border-red-200 bg-red-50" : "border-gray-200 bg-gray-50"
+              }`}
+            >
+              <h4 className="text-xs uppercase tracking-wide font-semibold text-gray-500 mb-3">
+                {section.heading}
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+                {section.rows.map(([label, value], j) => (
+                  <div key={j} className="flex justify-between sm:block">
+                    <p className="text-xs text-gray-500">{label}</p>
+                    <p className={`text-sm font-semibold ${section.danger ? "text-red-700" : "text-gray-800"}`}>
+                      {value === undefined || value === null || value === "" ? "-" : String(value)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// PART DETAIL MODAL
+// Shows production rejection and PDIR rejection as two clearly
+// separated panels — never merged into one number or one list.
+// ============================================================
+
+function PartDetailModal({ part, onClose }) {
+  if (!part) return null;
+
+  const productionReasons = Array.isArray(part.productionReasons) ? part.productionReasons : [];
+  const pdirReasons = Array.isArray(part.pdirReasons) ? part.pdirReasons : [];
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* HEADER */}
@@ -1454,105 +1986,102 @@ function PartDetailModal({ part, onClose }) {
         </div>
 
         <div className="p-6 space-y-6">
-          {/* PART INFORMATION */}
+          {/* PART OVERVIEW */}
           <div>
             <h4 className="text-xs uppercase tracking-wide font-semibold text-gray-500 mb-3">
-              Part Information
+              Overview
             </h4>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <ModalStat label="Total Produced" value={part.totalProduction ?? 0} />
-              <ModalStat label="Total Checked" value={part.totalChecked ?? 0} />
-              <ModalStat label="Total Rejected" value={part.totalRejected ?? 0} danger />
-              <ModalStat label="Rejection Rate" value={`${part.rejectionRate ?? 0}%`} danger />
-              <ModalStat label="PDIR Inspections" value={part.pdirEntries ?? 0} />
-              <ModalStat
-                label="Efficiency"
-                value={part.efficiency !== undefined ? `${part.efficiency}%` : "-"}
-              />
+              <ModalStat label="Efficiency" value={`${part.efficiency ?? 0}%`} />
+              <ModalStat label="Total Checked (PDIR)" value={part.totalChecked ?? 0} />
+              <ModalStat label="Combined Rejected" value={part.combinedRejected ?? 0} danger />
             </div>
           </div>
 
-          {/* MAIN REJECTION TYPE CALLOUT */}
-          {mainReason && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-              <div className="flex items-center gap-2">
-                <ShieldAlert size={16} className="text-red-600" />
-                <p className="text-xs uppercase tracking-wide font-semibold text-red-700">
-                  Main Rejection Type
+          {/* TWO SEPARATE PANELS: PRODUCTION vs PDIR */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* PRODUCTION REJECTION PANEL */}
+            <div className="rounded-xl border-2 border-orange-200 bg-orange-50 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Wrench size={15} className="text-orange-600" />
+                <p className="text-xs uppercase tracking-wide font-semibold text-orange-700">
+                  Production Rejection
                 </p>
               </div>
-              <p className="text-base font-bold text-red-800 mt-1">{mainReason.reason}</p>
-              <p className="text-sm text-red-700 mt-0.5">
-                {mainReason.qty} rejected pieces &middot; {mainReason.percentage}% of total
-                rejections for this part
+              <p className="text-2xl font-bold text-orange-800">{part.productionRejected ?? 0}</p>
+              <p className="text-xs text-orange-700 mt-0.5">
+                {part.productionRejectionRate ?? 0}% of {part.totalProduction ?? 0} produced
               </p>
+
+              {productionReasons.length > 0 ? (
+                <div className="mt-3 space-y-1.5">
+                  {productionReasons.map((r, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs bg-white/70 rounded px-2 py-1.5">
+                      <span className="text-gray-700 font-medium">{r.reason}</span>
+                      <span className="text-orange-700 font-semibold">{r.qty} ({r.percentage}%)</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-orange-700 mt-3">No production rejection records for this part.</p>
+              )}
             </div>
-          )}
 
-          {/* REJECTION BREAKDOWN LIST */}
-          <div>
-            <h4 className="text-xs uppercase tracking-wide font-semibold text-gray-500 mb-3">
-              Rejection Breakdown
-            </h4>
-
-            {reasons.length > 0 ? (
-              <div className="space-y-2">
-                {reasons.map((r, index) => (
-                  <div
-                    key={index}
-                    className={`flex items-center justify-between px-3 py-2.5 rounded-lg border ${
-                      index === 0
-                        ? "border-red-200 bg-red-50"
-                        : "border-gray-200 bg-gray-50"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-gray-400 w-5">
-                        {index + 1}.
-                      </span>
-                      <span className="text-sm font-medium text-gray-800">{r.reason}</span>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-semibold text-red-600">{r.qty} rejected</p>
-                      <p className="text-xs text-gray-500">{r.percentage}%</p>
-                    </div>
-                  </div>
-                ))}
+            {/* PDIR REJECTION PANEL */}
+            <div className="rounded-xl border-2 border-red-200 bg-red-50 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <ShieldAlert size={15} className="text-red-600" />
+                <p className="text-xs uppercase tracking-wide font-semibold text-red-700">
+                  PDIR Rejection
+                </p>
               </div>
-            ) : (
-              <p className="text-sm text-gray-500">
-                No PDIR rejection records found for this part.
+              <p className="text-2xl font-bold text-red-800">{part.pdirRejected ?? 0}</p>
+              <p className="text-xs text-red-700 mt-0.5">
+                {part.pdirRejectionRate ?? 0}% of {part.totalChecked ?? 0} checked
               </p>
-            )}
+
+              {pdirReasons.length > 0 ? (
+                <div className="mt-3 space-y-1.5">
+                  {pdirReasons.map((r, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs bg-white/70 rounded px-2 py-1.5">
+                      <span className="text-gray-700 font-medium">{r.reason}</span>
+                      <span className="text-red-700 font-semibold">{r.qty} ({r.percentage}%)</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-red-700 mt-3">No PDIR rejection records for this part.</p>
+              )}
+            </div>
           </div>
 
-          {/* SMALL REJECTION CHART */}
-          {chartData.length > 0 && (
+          {/* COMPARISON CHART */}
+          {(productionReasons.length > 0 || pdirReasons.length > 0) && (
             <div>
               <h4 className="text-xs uppercase tracking-wide font-semibold text-gray-500 mb-3">
-                Rejection Types vs Quantity
+                Rejection Reasons — Production vs PDIR
               </h4>
-              <div style={{ height: Math.max(chartData.length * 32, 120) }}>
+              <div style={{ height: Math.max((productionReasons.length + pdirReasons.length) * 26, 140) }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={chartData}
+                    data={[
+                      ...productionReasons.map((r) => ({ name: truncateLabel(`[Prod] ${r.reason}`, 20), qty: r.qty, fill: "#f59e0b" })),
+                      ...pdirReasons.map((r) => ({ name: truncateLabel(`[PDIR] ${r.reason}`, 20), qty: r.qty, fill: "#ef4444" })),
+                    ]}
                     layout="vertical"
                     margin={{ top: 0, right: 16, left: 0, bottom: 0 }}
                     barCategoryGap="22%"
                   >
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                     <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={90}
-                      tick={{ fontSize: 10 }}
-                    />
-                    <Tooltip
-                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                      labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName || ""}
-                    />
-                    <Bar dataKey="qty" fill="#ef4444" radius={[0, 4, 4, 0]} maxBarSize={16} name="Rejected Qty" />
+                    <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 10 }} />
+                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                    <Bar dataKey="qty" radius={[0, 4, 4, 0]} maxBarSize={16}>
+                      {[...productionReasons, ...pdirReasons].map((_, i) => (
+                        <Cell key={i} fill={i < productionReasons.length ? "#f59e0b" : "#ef4444"} />
+                      ))}
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -1605,9 +2134,9 @@ function ReportTable({ title, headers, children, isEmpty = false }) {
         <table className="min-w-full">
           <thead className="bg-gray-50">
             <tr>
-              {headers.map((header) => (
+              {headers.map((header, i) => (
                 <th
-                  key={header}
+                  key={`${header}-${i}`}
                   className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap"
                 >
                   {header}

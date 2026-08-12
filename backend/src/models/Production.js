@@ -73,11 +73,20 @@ const productionSchema = new mongoose.Schema(
     // because it didn't exist on the schema. This is what makes a
     // real "Production Rejection Analysis" (by reason) possible,
     // separate from PDIR rejection.
-    rejectionReason: {
+    rejections: [
+  {
+    reason: {
       type: String,
+      required: true,
       trim: true,
-      default: "",
     },
+    qty: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+  },
+],
 
     remarks: {
       type: String,

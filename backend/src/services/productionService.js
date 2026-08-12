@@ -55,8 +55,12 @@ export const updateProduction = async (id, data) => {
     throw new ApiError(404, "Production entry not found");
   }
 
-  Object.assign(production, data);
+  // Update only the fields provided in the request
+  Object.keys(data).forEach((key) => {
+    production[key] = data[key];
+  });
 
+  // Always recalculate grade when production is updated
   production.grade = calculateGrade(
     Number(production.actualProduction || 0)
   );

@@ -20,30 +20,41 @@ export default function EditProduction() {
     targetProd: "",
     actualProd: "",
     qtyRejected: "0",
-    rejectionReason: "",
+    rejections: [],
     remarks: "",
   });
 
   const [grade, setGrade] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(true);
+
   const [operators, setOperators] = useState([]);
   const [machines, setMachines] = useState([]);
   const [components, setComponents] = useState([]);
 
-  // IMPORTANT:
-  // Keep this list exactly the same as the dropdown
-  // used in your AddProduction.jsx file.
   const rejectionTypes = [
     "TOTAL LENGTH UNDERSIZE",
     "TOTAL LENGTH OVERSIZE",
-    "DIAMETER UNDERSIZE",
-    "DIAMETER OVERSIZE",
-    "THREAD ISSUE",
-    "SURFACE FINISH",
-    "DENT / DAMAGE",
-    "MATERIAL DEFECT",
-    "OTHER",
+    "OD UNDERSIZE",
+    "OD OVERSIZE",
+    "GROOVE OD OVERSIZE",
+    "GROOVE UNEVEN",
+    "GROOVE OD UNDERSIZE",
+    "ROUGH SURFACE FINISH",
+    "R/M PROBLEM",
+    "ROD BEND",
+    "PLATTING",
+    "ID OVERSIZE",
+    "ID UNDERSIZE",
+    "THREADING GO NC",
+    "THREADING NO-GO PASS",
+    "CHAMFER OUT",
+    "DRILL OUT",
+    "FACE UNEVEN",
+    "FLAT THREAD",
+    "DRILL DEPTH UNDERSIZE",
+    "DRILL DEPTH OVERSIZE",
+    "TOOL MARK ON OD",
   ];
 
   useEffect(() => {
@@ -77,6 +88,30 @@ export default function EditProduction() {
 
         const p = productionRes.data.data;
 
+        // Support new multiple rejection structure
+        let existingRejections = [];
+
+        if (
+          Array.isArray(p.rejections) &&
+          p.rejections.length > 0
+        ) {
+          existingRejections = p.rejections.map((rejection) => ({
+            reason: rejection.reason || "",
+            qty: rejection.qty ?? "",
+          }));
+        } else if (
+          Number(p.rejectedQty || 0) > 0 &&
+          p.rejectionReason
+        ) {
+          // Backward compatibility for old records
+          existingRejections = [
+            {
+              reason: p.rejectionReason,
+              qty: p.rejectedQty,
+            },
+          ];
+        }
+
         setFormData({
           operator: p.operator?._id || "",
           date: p.date
@@ -92,7 +127,7 @@ export default function EditProduction() {
           targetProd: p.targetProduction ?? "",
           actualProd: p.actualProduction ?? "",
           qtyRejected: p.rejectedQty ?? 0,
-          rejectionReason: p.rejectionReason || "",
+          rejections: existingRejections,
           remarks: p.remarks || "",
         });
       } catch (err) {
@@ -113,7 +148,6 @@ export default function EditProduction() {
     loadData();
   }, [id]);
 
-  // Calculate grade whenever actual production changes
   useEffect(() => {
     setGrade(
       calculateGrade(
@@ -125,7 +159,7 @@ export default function EditProduction() {
   const handleChange = (e) => {
     const { name, value } = e.target;
 
-    // Operator Selection
+    // Operator selection
     if (name === "operator") {
       const selectedOperator = operators.find(
         (operator) => operator._id === value
@@ -140,7 +174,7 @@ export default function EditProduction() {
       return;
     }
 
-    // Component Selection
+    // Component selection
     if (name === "partName") {
       const selectedComponent = components.find(
         (component) => component._id === value
@@ -149,22 +183,21 @@ export default function EditProduction() {
       setFormData((prev) => ({
         ...prev,
         partName: value,
-        partNo:
-          selectedComponent?.partNumber || "",
+        partNo: selectedComponent?.partNumber || "",
       }));
 
       return;
     }
 
-    // Clear rejection reason if rejected quantity becomes 0
+    // Rejected quantity
     if (name === "qtyRejected") {
       setFormData((prev) => ({
         ...prev,
         qtyRejected: value,
-        rejectionReason:
+        rejections:
           Number(value) > 0
-            ? prev.rejectionReason
-            : "",
+            ? prev.rejections
+            : [],
       }));
 
       return;
@@ -176,18 +209,111 @@ export default function EditProduction() {
     }));
   };
 
+  const addRejection = () => {
+    setFormData((prev) => ({
+      ...prev,
+      rejections: [
+        ...prev.rejections,
+        {
+          reason: "",
+          qty: "",
+        },
+      ],
+    }));
+  };
+
+  const updateRejection = (
+    index,
+    field,
+    value
+  ) => {
+    setFormData((prev) => {
+      const updatedRejections = [
+        ...prev.rejections,
+      ];
+
+      updatedRejections[index] = {
+        ...updatedRejections[index],
+        [field]: value,
+      };
+
+      return {
+        ...prev,
+        rejections: updatedRejections,
+      };
+    });
+  };
+
+  const removeRejection = (index) => {
+    setFormData((prev) => ({
+      ...prev,
+      rejections: prev.rejections.filter(
+        (_, i) => i !== index
+      ),
+    }));
+  };
+
+  const totalRejectionBreakdown =
+    formData.rejections.reduce(
+      (sum, rejection) =>
+        sum + Number(rejection.qty || 0),
+      0
+    );
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Validate rejection type
-    if (
-      Number(formData.qtyRejected) > 0 &&
-      !formData.rejectionReason
-    ) {
-      alert(
-        "Please select Type of Rejection"
+    const rejectedQty = Number(
+      formData.qtyRejected || 0
+    );
+
+    // Validate rejection breakdown
+    if (rejectedQty > 0) {
+      if (formData.rejections.length === 0) {
+        alert(
+          "Please add at least one rejection reason."
+        );
+        return;
+      }
+
+      const invalidRejection =
+        formData.rejections.some(
+          (rejection) =>
+            !rejection.reason ||
+            Number(rejection.qty || 0) <= 0
+        );
+
+      if (invalidRejection) {
+        alert(
+          "Please select a rejection reason and enter a valid quantity for every rejection."
+        );
+        return;
+      }
+
+      // Prevent duplicate reasons
+      const reasons = formData.rejections.map(
+        (rejection) => rejection.reason
       );
-      return;
+
+      if (
+        new Set(reasons).size !==
+        reasons.length
+      ) {
+        alert(
+          "The same rejection reason cannot be added more than once."
+        );
+        return;
+      }
+
+      // Make sure reason quantities equal total rejected
+      if (
+        totalRejectionBreakdown !== rejectedQty
+      ) {
+        alert(
+          `Rejection quantity mismatch. Total rejected quantity is ${rejectedQty}, but the rejection reasons total ${totalRejectionBreakdown}.`
+        );
+        return;
+      }
     }
 
     try {
@@ -198,28 +324,36 @@ export default function EditProduction() {
         machine: formData.machine,
         operationNo: formData.opn,
         component: formData.partName,
+
         cycleTime: Number(
           formData.cycleTime || 0
         ),
+
         machineRunTime: Number(
           formData.machineRunTime || 0
         ),
+
         targetProduction: Number(
           formData.targetProd || 0
         ),
+
         actualProduction: Number(
           formData.actualProd || 0
         ),
-        rejectedQty: Number(
-          formData.qtyRejected || 0
-        ),
 
-        // IMPORTANT:
-        // Send rejectionReason to backend
-        rejectionReason:
-          Number(formData.qtyRejected) > 0
-            ? formData.rejectionReason
-            : "",
+        rejectedQty,
+
+        rejections:
+          rejectedQty > 0
+            ? formData.rejections.map(
+                (rejection) => ({
+                  reason: rejection.reason,
+                  qty: Number(
+                    rejection.qty
+                  ),
+                })
+              )
+            : [],
 
         remarks: formData.remarks,
       });
@@ -534,52 +668,173 @@ export default function EditProduction() {
           </div>
         </div>
 
-        {/* Rejection */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-100">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Qty Rejected
-            </label>
-
-            <input
-              type="number"
-              min="0"
-              name="qtyRejected"
-              value={formData.qtyRejected}
-              onChange={handleChange}
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-          </div>
-
-          {Number(formData.qtyRejected) > 0 && (
+        {/* Rejection Section */}
+        <div className="pt-4 border-t border-gray-100">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Type of Rejection
-                <span className="text-red-500">
-                  {" "}*
-                </span>
+                Qty Rejected
               </label>
 
-              <select
-                name="rejectionReason"
-                value={formData.rejectionReason}
+              <input
+                type="number"
+                min="0"
+                name="qtyRejected"
+                value={formData.qtyRejected}
                 onChange={handleChange}
-                required
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 bg-white"
-              >
-                <option value="">
-                  Select Type of Rejection
-                </option>
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
 
-                {rejectionTypes.map((type) => (
-                  <option
-                    key={type}
-                    value={type}
-                  >
-                    {type}
-                  </option>
-                ))}
-              </select>
+            {Number(formData.qtyRejected) > 0 && (
+              <div className="flex items-end">
+                <div className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">
+                      Rejection Breakdown
+                    </span>
+
+                    <span
+                      className={
+                        totalRejectionBreakdown ===
+                        Number(formData.qtyRejected)
+                          ? "text-green-600 font-semibold"
+                          : "text-red-600 font-semibold"
+                      }
+                    >
+                      {totalRejectionBreakdown} /{" "}
+                      {Number(formData.qtyRejected)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Multiple Rejection Reasons */}
+          {Number(formData.qtyRejected) > 0 && (
+            <div className="mt-5 space-y-4">
+              {formData.rejections.map(
+                (rejection, index) => {
+                  const selectedReasons =
+                    formData.rejections
+                      .filter(
+                        (_, i) => i !== index
+                      )
+                      .map(
+                        (item) => item.reason
+                      );
+
+                  return (
+                    <div
+                      key={index}
+                      className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end bg-gray-50 border border-gray-200 rounded-lg p-4"
+                    >
+                      <div className="md:col-span-7">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Rejection Reason{" "}
+                          {index + 1}
+                        </label>
+
+                        <select
+                          value={rejection.reason}
+                          onChange={(e) =>
+                            updateRejection(
+                              index,
+                              "reason",
+                              e.target.value
+                            )
+                          }
+                          required
+                          className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 bg-white"
+                        >
+                          <option value="">
+                            Select Type of Rejection
+                          </option>
+
+                          {rejectionTypes.map(
+                            (type) => (
+                              <option
+                                key={type}
+                                value={type}
+                                disabled={selectedReasons.includes(
+                                  type
+                                )}
+                              >
+                                {type}
+                              </option>
+                            )
+                          )}
+                        </select>
+                      </div>
+
+                      <div className="md:col-span-3">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Rejected Qty
+                        </label>
+
+                        <input
+                          type="number"
+                          min="1"
+                          value={rejection.qty}
+                          onChange={(e) =>
+                            updateRejection(
+                              index,
+                              "qty",
+                              e.target.value
+                            )
+                          }
+                          required
+                          className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                        />
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            removeRejection(
+                              index
+                            )
+                          }
+                          className="w-full px-4 py-2 bg-red-100 text-red-600 hover:bg-red-200 rounded-lg font-medium"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+              )}
+
+              <button
+                type="button"
+                onClick={addRejection}
+                disabled={
+                  formData.rejections.length >=
+                  rejectionTypes.length
+                }
+                className="w-full border-2 border-dashed border-teal-300 text-teal-600 hover:bg-teal-50 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                + Add Another Rejection Reason
+              </button>
+
+              {formData.rejections.length ===
+                0 && (
+                <p className="text-sm text-red-500">
+                  Add at least one rejection reason.
+                </p>
+              )}
+
+              {totalRejectionBreakdown !==
+                Number(
+                  formData.qtyRejected
+                ) && (
+                <p className="text-sm text-red-500">
+                  Rejection breakdown must equal
+                  the total rejected quantity.
+                </p>
+              )}
             </div>
           )}
         </div>

@@ -14,6 +14,31 @@ const safeRate = (numerator, denominator) =>
     ? Number(((numerator / denominator) * 100).toFixed(2))
     : 0;
 
+const getProductionRejections = (item) => {
+  if (Array.isArray(item.rejections) && item.rejections.length > 0) {
+    return item.rejections
+      .map((rejection) => ({
+        reason: rejection.reason?.trim() || "Unspecified",
+        qty: toNum(rejection.qty ?? rejection.quantity),
+      }))
+      .filter((rejection) => rejection.qty > 0);
+  }
+
+  // Backward compatibility for old production records
+  const oldQty = toNum(item.rejectedQty);
+
+  if (oldQty > 0) {
+    return [
+      {
+        reason: item.rejectionReason?.trim() || "Unspecified",
+        qty: oldQty,
+      },
+    ];
+  }
+
+  return [];
+};
+
 const buildReasonBreakdown = (reasonTotals, totalRejected) =>
   Object.entries(reasonTotals)
     .map(([reason, qty]) => ({
@@ -26,21 +51,9 @@ const buildReasonBreakdown = (reasonTotals, totalRejected) =>
 /**
  * Resolves the "true" part identity for a PDIR record.
  *
- * PDIR now stores its own required `component` ObjectId ref directly
+ * PDIR stores its own required `component` ObjectId ref directly
  * on the document (decoupled from `production`, which is optional).
- * That direct ref is the most reliable source of truth — it exists
- * on every PDIR record, unlike production.component which is only
- * available when a production link happens to exist.
- *
- * Priority order:
- *   1. PDIR's own populated `component` field (direct ref) -- always
- *      present, always correct, never depends on a production link.
- *   2. production.component (populated via the production relation)
- *      -- fallback for older records saved before the direct ref
- *      existed.
- *   3. PDIR's own denormalized partNumber field.
- *   4. PDIR's own denormalized partName field.
- *   5. "Unknown" -- only when none of the above exist.
+ * That direct ref is the most reliable source of truth.
  */
 const resolvePdirPart = (item) => {
   const directComponent = item.component;
@@ -108,8 +121,6 @@ export const getReports = async (query) => {
 
   // =========================================================
   // 2. FETCH ALL PDIR DATA WITH ITS OWN COMPONENT REF
-  //    (this is the fix — PDIR.component is populated directly,
-  //    not only reached indirectly through production.component)
   // =========================================================
 
   let pdir = await PDIR.find()
@@ -139,7 +150,7 @@ export const getReports = async (query) => {
     });
 
   // =========================================================
-  // 3. GLOBAL SEARCH (unchanged, extended with direct component)
+  // 3. GLOBAL SEARCH
   // =========================================================
 
   if (searchRegex) {
@@ -149,7 +160,7 @@ export const getReports = async (query) => {
         item.remarks,
         item.grade,
         item.shift,
-        item.rejectionReason,
+        ...(getProductionRejections(item).map((rejection) => rejection.reason)),
 
         item.operator?.name,
         item.operator?.operatorId,
@@ -228,15 +239,20 @@ export const getReports = async (query) => {
     0
   );
 
-  const productionRejected = productions.reduce(
-    (sum, item) => sum + toNum(item.rejectedQty),
-    0
-  );
+  // STEP 2 FIX: Accurate calculation when one production entry has multiple rejections
+  const productionRejected = productions.reduce((sum, item) => {
+    const rejections = getProductionRejections(item);
+
+    if (rejections.length > 0) {
+      return sum + rejections.reduce((total, rejection) => total + rejection.qty, 0);
+    }
+
+    return sum + toNum(item.rejectedQty);
+  }, 0);
 
   const efficiency = safeRate(totalProduction, totalTarget);
 
   // Production-side scrap rate = rejected / actual produced.
-  // Kept entirely separate from PDIR's checked/rejected rate below.
   const productionRejectionRate = safeRate(productionRejected, totalProduction);
 
   // =========================================================
@@ -255,14 +271,11 @@ export const getReports = async (query) => {
 
   const totalRejected = productionRejected + pdirRejected;
 
-  // PDIR rejection rate = rejected / checked. Never derived from
-  // production quantity, and never mixed with production scrap.
+  // PDIR rejection rate = rejected / checked.
   const rejectionRate = safeRate(pdirRejected, totalQtyChecked);
 
   // =========================================================
   // 6. PRODUCTION GROUPING BY COMPONENT
-  //    (source of truth for production-side scrap + reasons —
-  //    fully independent of PDIR)
   // =========================================================
 
   const productionGroups = {};
@@ -289,19 +302,26 @@ export const getReports = async (query) => {
     bucket.totalEntries += 1;
     bucket.totalTarget += toNum(item.targetProduction);
     bucket.totalProduction += toNum(item.actualProduction);
-    bucket.totalRejected += toNum(item.rejectedQty);
 
-    const rejectedQty = toNum(item.rejectedQty);
-    if (rejectedQty > 0) {
-      const reason = item.rejectionReason?.trim() || "Unspecified";
+    // STEP 4 FIX: Correctly sum rejections during component grouping
+    const productionRejections = getProductionRejections(item);
+    const rejectionTotal = productionRejections.reduce(
+      (sum, rejection) => sum + rejection.qty,
+      0
+    );
+
+    bucket.totalRejected +=
+      rejectionTotal > 0 ? rejectionTotal : toNum(item.rejectedQty);
+
+    productionRejections.forEach(({ reason, qty }) => {
       bucket.reasonTotals[reason] =
-        (bucket.reasonTotals[reason] || 0) + rejectedQty;
-    }
+        (bucket.reasonTotals[reason] || 0) + qty;
+    });
   });
 
   const productionGroupList = Object.values(productionGroups);
 
-  // Part-wise production report (unchanged shape/consumers)
+  // Part-wise production report
   const partWiseReport = productionGroupList
     .map((item) => ({
       componentId: item.componentId,
@@ -317,49 +337,61 @@ export const getReports = async (query) => {
     }))
     .sort((a, b) => b.totalProduction - a.totalProduction);
 
-  // NEW — component-wise PRODUCTION defect report (scrap during
-  // machining). Independent of PDIR; never mixes checked qty.
+  // STEP 3 FIX: Return detailed reason breakdown per component for frontend matching
   const componentWiseProductionDefect = productionGroupList
-    .map((g) => ({
-      _id: g.componentId || g.partNumber || g.partName,
-      componentId: g.componentId,
-      partName: g.partName,
-      partNumber: g.partNumber,
+    .map((g) => {
+      const reasons = buildReasonBreakdown(
+        g.reasonTotals,
+        g.totalRejected
+      );
 
-      totalProduced: g.totalProduction,
-      totalRejected: g.totalRejected,
-      entries: g.totalEntries,
-      rejectionRate: safeRate(g.totalRejected, g.totalProduction),
-    }))
+      return {
+        _id: g.componentId || g.partNumber || g.partName,
+        componentId: g.componentId,
+        partName: g.partName,
+        partNumber: g.partNumber,
+
+        totalProduced: g.totalProduction,
+        totalRejected: g.totalRejected,
+        entries: g.totalEntries,
+
+        rejectionRate: safeRate(
+          g.totalRejected,
+          g.totalProduction
+        ),
+
+        // Multiple rejection reasons for the same component
+        reasons,
+      };
+    })
     .sort((a, b) => b.totalRejected - a.totalRejected);
 
-  // NEW — production rejection reason-wise report (overall)
+  // Production rejection reason-wise report (overall)
   const productionRejectionReasonMap = {};
 
   productions.forEach((item) => {
-    const rejectedQty = toNum(item.rejectedQty);
-    if (rejectedQty <= 0) return;
+    const productionRejections = getProductionRejections(item);
 
-    const reason = item.rejectionReason?.trim() || "Unspecified";
+    productionRejections.forEach(({ reason, qty }) => {
+      if (!productionRejectionReasonMap[reason]) {
+        productionRejectionReasonMap[reason] = {
+          _id: reason,
+          rejectionReason: reason,
+          totalRejected: 0,
+          occurrences: 0,
+        };
+      }
 
-    if (!productionRejectionReasonMap[reason]) {
-      productionRejectionReasonMap[reason] = {
-        _id: reason,
-        rejectionReason: reason,
-        totalRejected: 0,
-        occurrences: 0,
-      };
-    }
-
-    productionRejectionReasonMap[reason].totalRejected += rejectedQty;
-    productionRejectionReasonMap[reason].occurrences += 1;
+      productionRejectionReasonMap[reason].totalRejected += qty;
+      productionRejectionReasonMap[reason].occurrences += 1;
+    });
   });
 
   const productionRejectionReasonWise = Object.values(
     productionRejectionReasonMap
   ).sort((a, b) => b.totalRejected - a.totalRejected);
 
-  // NEW — highest production defect reason per component
+  // Highest production defect reason per component
   const highestProductionDefectReason = productionGroupList
     .map((g) => {
       const reasons = Object.entries(g.reasonTotals);
@@ -380,7 +412,7 @@ export const getReports = async (query) => {
     .sort((a, b) => b.totalRejected - a.totalRejected);
 
   // =========================================================
-  // 7. OPERATOR-WISE PRODUCTION REPORT (unchanged)
+  // 7. OPERATOR-WISE PRODUCTION REPORT
   // =========================================================
 
   const operatorWiseMap = {};
@@ -418,8 +450,6 @@ export const getReports = async (query) => {
 
   // =========================================================
   // 8. PDIR GROUPING BY RESOLVED PART IDENTITY
-  //    (single source of truth used by every PDIR-based report
-  //    below; now correctly keyed via the direct component ref)
   // =========================================================
 
   const pdirGroups = {};
@@ -469,7 +499,7 @@ export const getReports = async (query) => {
   const pdirGroupList = Object.values(pdirGroups);
 
   // =========================================================
-  // 9. COMPONENT-WISE PDIR DEFECT REPORT (unchanged shape)
+  // 9. COMPONENT-WISE PDIR DEFECT REPORT
   // =========================================================
 
   const componentWiseDefect = pdirGroupList
@@ -486,7 +516,7 @@ export const getReports = async (query) => {
     .sort((a, b) => b.totalRejected - a.totalRejected);
 
   // =========================================================
-  // 10. PDIR REJECTION REASON-WISE REPORT (unchanged shape)
+  // 10. PDIR REJECTION REASON-WISE REPORT
   // =========================================================
 
   const rejectionReasonMap = {};
@@ -515,7 +545,7 @@ export const getReports = async (query) => {
   );
 
   // =========================================================
-  // 11. HIGHEST PDIR DEFECT REASON PER COMPONENT (unchanged shape)
+  // 11. HIGHEST PDIR DEFECT REASON PER COMPONENT
   // =========================================================
 
   const highestDefectReason = pdirGroupList
@@ -538,11 +568,7 @@ export const getReports = async (query) => {
     .sort((a, b) => b.totalRejected - a.totalRejected);
 
   // =========================================================
-  // 12. PART ANALYSIS — production and PDIR kept as two separate,
-  //     clearly-labelled nested objects, joined only by componentId
-  //     (falling back to normalized part number / name only for
-  //     legacy PDIR records with no component ref at all).
-  //     This is the dataset the Part-Wise Analysis UI should use.
+  // 12. PART ANALYSIS (Production & PDIR Kept Distinct)
   // =========================================================
 
   const pdirByComponentId = new Map();
@@ -596,8 +622,6 @@ export const getReports = async (query) => {
       partName: part.partName,
       partNumber: part.partNumber,
 
-      // PRODUCTION-side data — scrap generated on the machine.
-      // Rate = rejected ÷ actual produced. Never touches PDIR qty.
       production: {
         totalEntries: part.totalEntries,
         totalTarget: part.totalTarget,
@@ -609,8 +633,6 @@ export const getReports = async (query) => {
         reasons: productionReasons,
       },
 
-      // PDIR-side data — rejected during post-production inspection.
-      // Rate = rejected ÷ checked. Never touches production qty.
       pdir: {
         totalChecked: pdirGroup ? pdirGroup.totalChecked : 0,
         totalRejected: pdirGroup ? pdirGroup.totalRejected : 0,
@@ -622,15 +644,11 @@ export const getReports = async (query) => {
         reasons: pdirReasons,
       },
 
-      // Combined figure only for "how many pieces of this part have
-      // been rejected across both stages" style totals — never used
-      // to compute a blended rate.
       combinedRejected: part.totalRejected + (pdirGroup ? pdirGroup.totalRejected : 0),
     };
   });
 
-  // Append PDIR-only parts that never matched a production part-wise
-  // row (inspection recorded for a part with no linked production).
+  // Append PDIR-only parts
   pdirGroupList.forEach((g) => {
     if (matchedPdirKeys.has(g.key)) return;
 
@@ -672,7 +690,7 @@ export const getReports = async (query) => {
   );
 
   // =========================================================
-  // 13. DETAILED PDIR REPORT (unchanged, now includes direct component)
+  // 13. DETAILED PDIR REPORT
   // =========================================================
 
   const pdirDetailedReport = pdir.map((item) => ({
@@ -706,14 +724,14 @@ export const getReports = async (query) => {
           targetProduction: item.production.targetProduction,
           actualProduction: item.production.actualProduction,
           rejectedQty: item.production.rejectedQty,
-          rejectionReason: item.production.rejectionReason,
+          rejections: item.production.rejections || [],
           grade: item.production.grade,
         }
       : null,
   }));
 
   // =========================================================
-  // 14. MONTHLY PRODUCTION CHART (unchanged)
+  // 14. MONTHLY PRODUCTION CHART
   // =========================================================
 
   const monthlyMap = {};
@@ -758,11 +776,11 @@ export const getReports = async (query) => {
       totalProduction,
       totalRejected,
 
-      // Production-floor scrap (independent metric)
+      // Production-floor scrap
       productionRejected,
       productionRejectionRate,
 
-      // PDIR / quality inspection rejection (independent metric)
+      // PDIR / quality inspection rejection
       pdirRejected,
       totalQtyChecked,
       rejectionRate,
@@ -775,7 +793,7 @@ export const getReports = async (query) => {
     pdir,
     pdirDetailedReport,
 
-    // Production-side reports (independent of PDIR)
+    // Production-side reports
     partWiseReport,
     componentWiseProductionDefect,
     productionRejectionReasonWise,
@@ -784,13 +802,12 @@ export const getReports = async (query) => {
     // Operator-wise report
     operatorWiseReport,
 
-    // PDIR-side reports (independent of Production)
+    // PDIR-side reports
     componentWiseDefect,
     rejectionReasonWise,
     highestDefectReason,
 
-    // Combined per-part view — production and pdir kept as separate
-    // nested objects, never blended into one rate.
+    // Combined per-part view
     partAnalysis,
 
     // Monthly chart

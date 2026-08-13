@@ -35,6 +35,7 @@ import {
   X,
   Eye,
   Wrench,
+  CalendarDays,
 } from "lucide-react";
 import api from "../../services/api";
 
@@ -85,6 +86,61 @@ const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN") : "-");
 const reasonQty = (r) => toNum(r?.quantity ?? r?.qty ?? 0);
 
 // ============================================================
+// DATE RANGE HELPERS (client-side filtering)
+// ============================================================
+
+const getRangeBounds = (preset, customFrom, customTo) => {
+  const now = new Date();
+  let start = null;
+  let end = null;
+
+  if (preset === "daily") {
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  } else if (preset === "weekly") {
+    const day = now.getDay(); // 0=Sun..6=Sat
+    const diffToMonday = (day === 0 ? -6 : 1) - day;
+    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToMonday, 0, 0, 0, 0);
+    const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6, 23, 59, 59, 999);
+    start = monday;
+    end = sunday;
+  } else if (preset === "monthly") {
+    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  } else if (preset === "custom") {
+    if (customFrom) start = new Date(`${customFrom}T00:00:00`);
+    if (customTo) end = new Date(`${customTo}T23:59:59.999`);
+  }
+  // preset === "all" -> both stay null (no filtering)
+  return { start, end };
+};
+
+const isWithinRange = (value, start, end) => {
+  if (!start && !end) return true;
+  if (!value) return false;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return false;
+  if (start && d < start) return false;
+  if (end && d > end) return false;
+  return true;
+};
+
+const formatRangeLabel = (preset, start, end) => {
+  if (preset === "all") return "All Time";
+  if (!start && !end) return "All Time";
+  const f = (d) => (d ? d.toLocaleDateString("en-IN") : "");
+  if (preset === "daily") return `Today — ${f(start)}`;
+  if (preset === "weekly") return `This Week — ${f(start)} to ${f(end)}`;
+  if (preset === "monthly") return `This Month — ${f(start)} to ${f(end)}`;
+  if (preset === "custom") {
+    if (start && end) return `${f(start)} to ${f(end)}`;
+    if (start) return `From ${f(start)}`;
+    if (end) return `Until ${f(end)}`;
+  }
+  return "All Time";
+};
+
+// ============================================================
 // CSV EXPORT HELPER
 // ============================================================
 
@@ -127,10 +183,27 @@ export default function ReportsPage() {
   const [detailRecord, setDetailRecord] = useState(null); // { title, sections } for generic modal
 
   // Client-side-only filter scoped to the Component Rejection tab.
-  // TEMPORARY: replace with backend-driven filters (date/shift/part/
-  // operator/machine/reason + pagination) once report.service.js
-  // supports them — this only filters what's already been fetched.
   const [componentRejectionSearch, setComponentRejectionSearch] = useState("");
+
+  // ============================================================
+  // DATE RANGE FILTER STATE (Daily / Weekly / Monthly / Custom / All)
+  // Client-side only — recomputes aggregates from the raw
+  // productions/pdir arrays already returned by /reports.
+  // ============================================================
+
+  const [datePreset, setDatePreset] = useState("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+
+  const { start: rangeStart, end: rangeEnd } = useMemo(
+    () => getRangeBounds(datePreset, customFrom, customTo),
+    [datePreset, customFrom, customTo]
+  );
+
+  const rangeLabel = useMemo(
+    () => formatRangeLabel(datePreset, rangeStart, rangeEnd),
+    [datePreset, rangeStart, rangeEnd]
+  );
 
   // ============================================================
   // FETCH REPORT WHEN SEARCH CHANGES (debounced)
@@ -176,43 +249,267 @@ export default function ReportsPage() {
   // RAW DATA (from /reports response)
   // ============================================================
 
-  const summary = reportData?.summary || {};
   const productionData = reportData?.productions || [];
   const pdirData = reportData?.pdirDetailedReport || reportData?.pdir || [];
 
-  // Production-side (independent of PDIR)
-  const partWiseReport = reportData?.partWiseReport || [];
-  const componentWiseProductionDefect =
-    reportData?.componentWiseProductionDefect || [];
-  const productionRejectionReasonWise =
-    reportData?.productionRejectionReasonWise || [];
-  const highestProductionDefectReason =
-    reportData?.highestProductionDefectReason || [];
-
-  // PDIR-side (independent of Production)
-  const componentWiseDefect = reportData?.componentWiseDefect || [];
-  const rejectionReasonWise = reportData?.rejectionReasonWise || [];
-  const highestDefectReason = reportData?.highestDefectReason || [];
-
-  const operatorWiseReport = reportData?.operatorWiseReport || [];
+  // Part-wise merged data — NOT affected by the date filter (see
+  // banner in the Part Wise tab). Recomputing this accurately client
+  // side would require duplicating the backend's component-matching
+  // logic (resolvePdirPart) and risks silently wrong numbers.
+  const partAnalysis = reportData?.partAnalysis || [];
   const monthlyChart = reportData?.monthlyChart || [];
 
-  // Pre-merged, correctly-keyed Production + PDIR data per part —
-  // production and pdir kept as two separate nested objects.
-  const partAnalysis = reportData?.partAnalysis || [];
+  // ============================================================
+  // DATE-FILTERED RAW ARRAYS
+  // ============================================================
+
+  const filteredProductionData = useMemo(
+    () => productionData.filter((item) => isWithinRange(item.date, rangeStart, rangeEnd)),
+    [productionData, rangeStart, rangeEnd]
+  );
+
+  const filteredPdirData = useMemo(
+    () => pdirData.filter((item) => isWithinRange(item.createdAt, rangeStart, rangeEnd)),
+    [pdirData, rangeStart, rangeEnd]
+  );
 
   // ============================================================
-  // COMPONENT REJECTION TAB — SCOPED CLIENT-SIDE FILTER
-  // Filters only the tables in this tab; KPI cards and charts keep
-  // showing overall totals so the top-line numbers don't jump
-  // around while someone is mid-search.
+  // RANGE-AWARE AGGREGATES — recomputed from the filtered raw
+  // production/PDIR arrays so every KPI, chart, and table in this
+  // page reflects the selected date range consistently.
+  // ============================================================
+
+  const rangeStats = useMemo(() => {
+    // ---------- PRODUCTION SIDE ----------
+    let totalTarget = 0;
+    let totalProduction = 0;
+    let productionRejected = 0;
+
+    const componentMap = {};
+    const reasonMap = {};
+    const operatorMap = {};
+
+    filteredProductionData.forEach((item) => {
+      totalTarget += toNum(item.targetProduction);
+      totalProduction += toNum(item.actualProduction);
+      productionRejected += toNum(item.rejectedQty);
+
+      const compKey =
+        item.component?._id || item.component?.componentName || "unknown";
+
+      if (!componentMap[compKey]) {
+        componentMap[compKey] = {
+          _id: compKey,
+          partName: item.component?.componentName || "Unknown",
+          partNumber: item.component?.partNumber || "-",
+          totalProduced: 0,
+          totalRejected: 0,
+          entries: 0,
+          reasonTotals: {},
+        };
+      }
+
+      const cBucket = componentMap[compKey];
+      cBucket.totalProduced += toNum(item.actualProduction);
+      cBucket.totalRejected += toNum(item.rejectedQty);
+      cBucket.entries += 1;
+
+      // Prefer the new rejections[] array; fall back to the legacy
+      // single rejectionReason for pre-migration records.
+      const itemReasons =
+        Array.isArray(item.rejections) && item.rejections.length > 0
+          ? item.rejections.map((r) => ({ reason: r.reason, qty: reasonQty(r) }))
+          : item.rejectionReason && toNum(item.rejectedQty) > 0
+          ? [{ reason: item.rejectionReason, qty: toNum(item.rejectedQty) }]
+          : [];
+
+      itemReasons.forEach(({ reason, qty }) => {
+        if (qty <= 0) return;
+        const key = (reason || "Unspecified").trim() || "Unspecified";
+
+        cBucket.reasonTotals[key] = (cBucket.reasonTotals[key] || 0) + qty;
+
+        if (!reasonMap[key]) {
+          reasonMap[key] = {
+            _id: key,
+            rejectionReason: key,
+            totalRejected: 0,
+            occurrences: 0,
+          };
+        }
+        reasonMap[key].totalRejected += qty;
+        reasonMap[key].occurrences += 1;
+      });
+
+      const opKey = item.operator?._id || item.operator?.name || "unknown";
+      if (!operatorMap[opKey]) {
+        operatorMap[opKey] = {
+          operatorName: item.operator?.name || "Unknown",
+          operatorCode: item.operator?.operatorId || "-",
+          totalEntries: 0,
+          totalTarget: 0,
+          totalProduction: 0,
+          totalRejected: 0,
+        };
+      }
+      const oBucket = operatorMap[opKey];
+      oBucket.totalEntries += 1;
+      oBucket.totalTarget += toNum(item.targetProduction);
+      oBucket.totalProduction += toNum(item.actualProduction);
+      oBucket.totalRejected += toNum(item.rejectedQty);
+    });
+
+    const componentWiseProductionDefect = Object.values(componentMap)
+      .map((c) => ({
+        _id: c._id,
+        partName: c.partName,
+        partNumber: c.partNumber,
+        totalProduced: c.totalProduced,
+        totalRejected: c.totalRejected,
+        entries: c.entries,
+        rejectionRate: pct(c.totalRejected, c.totalProduced),
+        reasons: Object.entries(c.reasonTotals)
+          .map(([reason, qty]) => ({
+            reason,
+            qty,
+            percentage: pct(qty, c.totalRejected),
+          }))
+          .sort((a, b) => b.qty - a.qty),
+      }))
+      .sort((a, b) => b.totalRejected - a.totalRejected);
+
+    const productionRejectionReasonWise = Object.values(reasonMap).sort(
+      (a, b) => b.totalRejected - a.totalRejected
+    );
+
+    const highestProductionDefectReason = Object.values(componentMap)
+      .map((c) => {
+        const reasons = Object.entries(c.reasonTotals);
+        if (!reasons.length) return null;
+        const [reason, qty] = reasons.sort((a, b) => b[1] - a[1])[0];
+        return {
+          _id: { partName: c.partName, partNumber: c.partNumber, rejectionReason: reason },
+          totalRejected: qty,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.totalRejected - a.totalRejected);
+
+    const operatorWiseReport = Object.values(operatorMap).map((o) => ({
+      ...o,
+      efficiency: pct(o.totalProduction, o.totalTarget),
+    }));
+
+    // ---------- PDIR SIDE ----------
+    let totalQtyChecked = 0;
+    let pdirRejected = 0;
+
+    const pdirComponentMap = {};
+    const pdirReasonMap = {};
+
+    filteredPdirData.forEach((item) => {
+      totalQtyChecked += toNum(item.qtyChecked);
+      pdirRejected += toNum(item.qtyRejected);
+
+      const key = item.partNumber || item.partName || "unknown";
+      if (!pdirComponentMap[key]) {
+        pdirComponentMap[key] = {
+          _id: key,
+          partName: item.partName || "Unknown",
+          partNumber: item.partNumber || "-",
+          totalChecked: 0,
+          totalRejected: 0,
+          pdirEntries: 0,
+          reasonTotals: {},
+        };
+      }
+      const pBucket = pdirComponentMap[key];
+      pBucket.totalChecked += toNum(item.qtyChecked);
+      pBucket.totalRejected += toNum(item.qtyRejected);
+      pBucket.pdirEntries += 1;
+
+      const rejectedQty = toNum(item.qtyRejected);
+      if (rejectedQty > 0) {
+        const reason = item.rejectionReason?.trim() || "Unspecified";
+
+        pBucket.reasonTotals[reason] = (pBucket.reasonTotals[reason] || 0) + rejectedQty;
+
+        if (!pdirReasonMap[reason]) {
+          pdirReasonMap[reason] = {
+            _id: reason,
+            rejectionReason: reason,
+            totalRejected: 0,
+            occurrences: 0,
+          };
+        }
+        pdirReasonMap[reason].totalRejected += rejectedQty;
+        pdirReasonMap[reason].occurrences += 1;
+      }
+    });
+
+    const componentWiseDefect = Object.values(pdirComponentMap)
+      .map((c) => ({
+        _id: c._id,
+        partName: c.partName,
+        partNumber: c.partNumber,
+        totalChecked: c.totalChecked,
+        totalRejected: c.totalRejected,
+        pdirEntries: c.pdirEntries,
+        rejectionRate: pct(c.totalRejected, c.totalChecked),
+      }))
+      .sort((a, b) => b.totalRejected - a.totalRejected);
+
+    const rejectionReasonWise = Object.values(pdirReasonMap).sort(
+      (a, b) => b.totalRejected - a.totalRejected
+    );
+
+    const highestDefectReason = Object.values(pdirComponentMap)
+      .map((c) => {
+        const reasons = Object.entries(c.reasonTotals);
+        if (!reasons.length) return null;
+        const [reason, qty] = reasons.sort((a, b) => b[1] - a[1])[0];
+        return {
+          _id: { partName: c.partName, partNumber: c.partNumber, rejectionReason: reason },
+          totalRejected: qty,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.totalRejected - a.totalRejected);
+
+    return {
+      totalEntries: filteredProductionData.length,
+      totalTarget,
+      totalProduction,
+      productionRejected,
+      productionRejectionRate: pct(productionRejected, totalProduction),
+      efficiency: pct(totalProduction, totalTarget),
+
+      totalQtyChecked,
+      pdirRejected,
+      rejectionRate: pct(pdirRejected, totalQtyChecked),
+
+      componentWiseProductionDefect,
+      productionRejectionReasonWise,
+      highestProductionDefectReason,
+      operatorWiseReport,
+
+      componentWiseDefect,
+      rejectionReasonWise,
+      highestDefectReason,
+    };
+  }, [filteredProductionData, filteredPdirData]);
+
+  // ============================================================
+  // COMPONENT REJECTION TAB — SCOPED TEXT FILTER (on top of the
+  // date range, applied after rangeStats is computed)
   // ============================================================
 
   const filteredComponentWiseProductionDefect = useMemo(() => {
     const q = componentRejectionSearch.trim().toLowerCase();
-    if (!q) return componentWiseProductionDefect;
+    const list = rangeStats.componentWiseProductionDefect;
+    if (!q) return list;
 
-    return componentWiseProductionDefect.filter((item) => {
+    return list.filter((item) => {
       const reasonText = Array.isArray(item.reasons)
         ? item.reasons.map((r) => r.reason).join(" ")
         : "";
@@ -221,24 +518,26 @@ export default function ReportsPage() {
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [componentWiseProductionDefect, componentRejectionSearch]);
+  }, [rangeStats.componentWiseProductionDefect, componentRejectionSearch]);
 
   const filteredProductionRejectionReasonWise = useMemo(() => {
     const q = componentRejectionSearch.trim().toLowerCase();
-    if (!q) return productionRejectionReasonWise;
+    const list = rangeStats.productionRejectionReasonWise;
+    if (!q) return list;
 
-    return productionRejectionReasonWise.filter((item) =>
+    return list.filter((item) =>
       String(item.rejectionReason || item._id || "")
         .toLowerCase()
         .includes(q)
     );
-  }, [productionRejectionReasonWise, componentRejectionSearch]);
+  }, [rangeStats.productionRejectionReasonWise, componentRejectionSearch]);
 
   const filteredHighestProductionDefectReason = useMemo(() => {
     const q = componentRejectionSearch.trim().toLowerCase();
-    if (!q) return highestProductionDefectReason;
+    const list = rangeStats.highestProductionDefectReason;
+    if (!q) return list;
 
-    return highestProductionDefectReason.filter((item) => {
+    return list.filter((item) => {
       const haystack = [
         item._id?.partName,
         item._id?.partNumber,
@@ -248,10 +547,10 @@ export default function ReportsPage() {
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [highestProductionDefectReason, componentRejectionSearch]);
+  }, [rangeStats.highestProductionDefectReason, componentRejectionSearch]);
 
   // ============================================================
-  // CSV EXPORT HANDLERS
+  // CSV EXPORT HANDLERS (export the date-filtered data)
   // ============================================================
 
   const handleDownloadProductionCSV = () => {
@@ -270,7 +569,7 @@ export default function ReportsPage() {
       "Grade",
     ];
 
-    const rows = productionData.map((entry) => [
+    const rows = filteredProductionData.map((entry) => [
       fmtDate(entry.date),
       entry.operator?.name || "-",
       entry.component?.componentName || "-",
@@ -289,7 +588,7 @@ export default function ReportsPage() {
       entry.grade || "-",
     ]);
 
-    downloadCSV("production-report.csv", rows, headers);
+    downloadCSV(`production-report_${datePreset}.csv`, rows, headers);
   };
 
   const handleDownloadPdirCSV = () => {
@@ -305,7 +604,7 @@ export default function ReportsPage() {
       "Remarks",
     ];
 
-    const rows = pdirData.map((entry) => [
+    const rows = filteredPdirData.map((entry) => [
       fmtDate(entry.createdAt),
       entry.partName || "-",
       entry.partNumber || "-",
@@ -317,7 +616,7 @@ export default function ReportsPage() {
       entry.remarks || "-",
     ]);
 
-    downloadCSV("pdir-report.csv", rows, headers);
+    downloadCSV(`pdir-report_${datePreset}.csv`, rows, headers);
   };
 
   const handleDownloadComponentRejectionCSV = () => {
@@ -341,7 +640,7 @@ export default function ReportsPage() {
         : "-",
     ]);
 
-    downloadCSV("component-rejection-report.csv", rows, headers);
+    downloadCSV(`component-rejection-report_${datePreset}.csv`, rows, headers);
   };
 
   // ============================================================
@@ -515,7 +814,7 @@ export default function ReportsPage() {
             "Reasons Breakdown",
             Array.isArray(c.reasons) && c.reasons.length > 0
               ? c.reasons.map((r) => `${r.reason} (${reasonQty(r)})`).join(", ")
-              : "Backend does not yet return a per-component reasons breakdown",
+              : "No rejections in the selected range",
           ],
         ],
       },
@@ -559,7 +858,8 @@ export default function ReportsPage() {
   };
 
   // ============================================================
-  // DERIVED: MONTHLY CHART
+  // DERIVED: MONTHLY CHART — intentionally all-time, unaffected by
+  // the date filter (it's already a month-by-month trend view).
   // ============================================================
 
   const monthlyChartData = useMemo(
@@ -587,53 +887,24 @@ export default function ReportsPage() {
   );
 
   // ============================================================
-  // DERIVED: OVERVIEW KPIs — production & PDIR kept fully separate
+  // DERIVED: OVERVIEW KPIs — now sourced from rangeStats so they
+  // reflect the selected date range, production & PDIR kept separate
   // ============================================================
 
-  const overviewKpis = useMemo(() => {
-    const totalEntries = toNum(summary.totalEntries);
-    const totalTarget = toNum(summary.totalTarget);
-    const totalProduction = toNum(summary.totalProduction);
-
-    const productionRejected = toNum(summary.productionRejected);
-    const productionRejectionRate =
-      summary.productionRejectionRate !== undefined
-        ? toNum(summary.productionRejectionRate)
-        : pct(productionRejected, totalProduction);
-
-    const totalQtyChecked = toNum(summary.totalQtyChecked);
-    const pdirRejected = toNum(summary.pdirRejected);
-    const pdirRejectionRate =
-      summary.rejectionRate !== undefined
-        ? toNum(summary.rejectionRate)
-        : pct(pdirRejected, totalQtyChecked);
-
-    const productionEfficiency = pct(totalProduction, totalTarget);
-
-    return {
-      totalEntries,
-      totalTarget,
-      totalProduction,
-      productionRejected,
-      productionRejectionRate,
-      totalQtyChecked,
-      pdirRejected,
-      pdirRejectionRate,
-      productionEfficiency,
-    };
-  }, [summary]);
-
-  const productionQualityDonutData = useMemo(() => {
-    if (!overviewKpis.totalProduction) return [];
-    const good = Math.max(
-      overviewKpis.totalProduction - overviewKpis.productionRejected,
-      0
-    );
-    return [
-      { name: "Good", value: good },
-      { name: "Rejected (Production)", value: overviewKpis.productionRejected },
-    ];
-  }, [overviewKpis]);
+  const overviewKpis = useMemo(
+    () => ({
+      totalEntries: rangeStats.totalEntries,
+      totalTarget: rangeStats.totalTarget,
+      totalProduction: rangeStats.totalProduction,
+      productionRejected: rangeStats.productionRejected,
+      productionRejectionRate: rangeStats.productionRejectionRate,
+      totalQtyChecked: rangeStats.totalQtyChecked,
+      pdirRejected: rangeStats.pdirRejected,
+      pdirRejectionRate: rangeStats.rejectionRate,
+      productionEfficiency: rangeStats.efficiency,
+    }),
+    [rangeStats]
+  );
 
   const pdirQualityDonutData = useMemo(() => {
     if (!overviewKpis.totalQtyChecked) return [];
@@ -648,10 +919,8 @@ export default function ReportsPage() {
   }, [overviewKpis]);
 
   // ============================================================
-  // DERIVED: PART-WISE ANALYSIS
-  // Built from backend's `partAnalysis`, which keeps production
-  // and pdir rejection as two separate nested objects — no blending
-  // on the frontend either.
+  // DERIVED: PART-WISE ANALYSIS — NOT date-filtered (see banner
+  // in the Part Wise tab below). Uses backend's all-time partAnalysis.
   // ============================================================
 
   const enrichedParts = useMemo(
@@ -756,39 +1025,17 @@ export default function ReportsPage() {
   );
 
   // ============================================================
-  // DERIVED: OPERATOR-WISE ANALYSIS
+  // DERIVED: OPERATOR-WISE ANALYSIS — now from rangeStats
   // ============================================================
 
   const enrichedOperators = useMemo(
     () =>
-      operatorWiseReport.map((op) => {
-        const totalProduction = toNum(op.totalProduction);
-        const totalTarget = toNum(op.totalTarget);
-        const totalRejected = toNum(op.totalRejected);
-
-        const efficiency =
-          op.efficiency !== undefined
-            ? toNum(op.efficiency)
-            : pct(totalProduction, totalTarget);
-
-        const rejectionRate = pct(totalRejected, totalProduction);
-
-        const rankScore =
-          Math.round((efficiency - rejectionRate) * 10) / 10;
-
-        return {
-          operatorName: op.operatorName || "Unknown",
-          operatorCode: op.operatorCode || "-",
-          totalEntries: toNum(op.totalEntries),
-          totalTarget,
-          totalProduction,
-          totalRejected,
-          efficiency,
-          rejectionRate,
-          rankScore,
-        };
+      rangeStats.operatorWiseReport.map((op) => {
+        const rejectionRate = pct(op.totalRejected, op.totalProduction);
+        const rankScore = Math.round((op.efficiency - rejectionRate) * 10) / 10;
+        return { ...op, rejectionRate, rankScore };
       }),
-    [operatorWiseReport]
+    [rangeStats.operatorWiseReport]
   );
 
   const operatorRanking = useMemo(
@@ -842,14 +1089,15 @@ export default function ReportsPage() {
   );
 
   // ============================================================
-  // DERIVED: PDIR CHECKING / PACKING OPERATOR ACTIVITY
+  // DERIVED: PDIR CHECKING / PACKING OPERATOR ACTIVITY — from
+  // filteredPdirData so this respects the date range too.
   // ============================================================
 
   const pdirOperatorActivity = useMemo(() => {
     const build = (getOperator) => {
       const map = new Map();
 
-      pdirData.forEach((entry) => {
+      filteredPdirData.forEach((entry) => {
         const opObj = getOperator(entry);
         if (!opObj) return;
 
@@ -878,51 +1126,46 @@ export default function ReportsPage() {
       checking: build((e) => e.checkingOperator),
       packing: build((e) => e.packingOperator),
     };
-  }, [pdirData]);
+  }, [filteredPdirData]);
 
   // ============================================================
-  // DERIVED: PDIR / QUALITY ANALYSIS
+  // DERIVED: PDIR / QUALITY ANALYSIS — from rangeStats
   // ============================================================
 
-  const pdirTotals = useMemo(() => {
-    const totalEntries = pdirData.length;
-    const totalQtyChecked =
-      summary.totalQtyChecked !== undefined
-        ? toNum(summary.totalQtyChecked)
-        : pdirData.reduce((sum, e) => sum + toNum(e.qtyChecked), 0);
-    const totalQtyRejected =
-      summary.pdirRejected !== undefined
-        ? toNum(summary.pdirRejected)
-        : pdirData.reduce((sum, e) => sum + toNum(e.qtyRejected), 0);
-    const rejectionRate = pct(totalQtyRejected, totalQtyChecked);
+  const pdirTotals = useMemo(
+    () => ({
+      totalEntries: filteredPdirData.length,
+      totalQtyChecked: rangeStats.totalQtyChecked,
+      totalQtyRejected: rangeStats.pdirRejected,
+      rejectionRate: rangeStats.rejectionRate,
+    }),
+    [filteredPdirData, rangeStats]
+  );
 
-    return { totalEntries, totalQtyChecked, totalQtyRejected, rejectionRate };
-  }, [pdirData, summary]);
-
-  const productionRejectionTotals = useMemo(() => {
-    const totalEntries = productionData.filter(
-      (e) => toNum(e.rejectedQty) > 0
-    ).length;
-    const totalProduced = toNum(summary.totalProduction);
-    const totalRejected = toNum(summary.productionRejected);
-    const rejectionRate = pct(totalRejected, totalProduced);
-    return { totalEntries, totalProduced, totalRejected, rejectionRate };
-  }, [productionData, summary]);
+  const productionRejectionTotals = useMemo(
+    () => ({
+      totalEntries: filteredProductionData.filter((e) => toNum(e.rejectedQty) > 0).length,
+      totalProduced: rangeStats.totalProduction,
+      totalRejected: rangeStats.productionRejected,
+      rejectionRate: rangeStats.productionRejectionRate,
+    }),
+    [filteredProductionData, rangeStats]
+  );
 
   const pdirHighlights = useMemo(() => {
-    const mostInspected = [...componentWiseDefect].sort(
+    const mostInspected = [...rangeStats.componentWiseDefect].sort(
       (a, b) => toNum(b.totalChecked) - toNum(a.totalChecked)
     )[0];
 
-    const mostDefectivePart = [...componentWiseDefect].sort(
+    const mostDefectivePart = [...rangeStats.componentWiseDefect].sort(
       (a, b) => toNum(b.totalRejected) - toNum(a.totalRejected)
     )[0];
 
-    const mostCommonReason = [...rejectionReasonWise].sort(
+    const mostCommonReason = [...rangeStats.rejectionReasonWise].sort(
       (a, b) => toNum(b.occurrences) - toNum(a.occurrences)
     )[0];
 
-    const highestRejectionQtyReason = [...rejectionReasonWise].sort(
+    const highestRejectionQtyReason = [...rangeStats.rejectionReasonWise].sort(
       (a, b) => toNum(b.totalRejected) - toNum(a.totalRejected)
     )[0];
 
@@ -932,27 +1175,27 @@ export default function ReportsPage() {
       mostCommonReason,
       highestRejectionQtyReason,
     };
-  }, [componentWiseDefect, rejectionReasonWise]);
+  }, [rangeStats.componentWiseDefect, rangeStats.rejectionReasonWise]);
 
   const productionRejectionHighlights = useMemo(() => {
-    const mostDefectivePart = [...componentWiseProductionDefect].sort(
+    const mostDefectivePart = [...rangeStats.componentWiseProductionDefect].sort(
       (a, b) => toNum(b.totalRejected) - toNum(a.totalRejected)
     )[0];
 
-    const mostCommonReason = [...productionRejectionReasonWise].sort(
+    const mostCommonReason = [...rangeStats.productionRejectionReasonWise].sort(
       (a, b) => toNum(b.occurrences) - toNum(a.occurrences)
     )[0];
 
-    const highestRejectionQtyReason = [...productionRejectionReasonWise].sort(
+    const highestRejectionQtyReason = [...rangeStats.productionRejectionReasonWise].sort(
       (a, b) => toNum(b.totalRejected) - toNum(a.totalRejected)
     )[0];
 
     return { mostDefectivePart, mostCommonReason, highestRejectionQtyReason };
-  }, [componentWiseProductionDefect, productionRejectionReasonWise]);
+  }, [rangeStats.componentWiseProductionDefect, rangeStats.productionRejectionReasonWise]);
 
   const productionDefectByPartChart = useMemo(
     () =>
-      [...componentWiseProductionDefect]
+      [...rangeStats.componentWiseProductionDefect]
         .sort((a, b) => toNum(b.totalRejected) - toNum(a.totalRejected))
         .slice(0, 10)
         .map((c) => ({
@@ -960,12 +1203,12 @@ export default function ReportsPage() {
           Produced: toNum(c.totalProduced),
           Rejected: toNum(c.totalRejected),
         })),
-    [componentWiseProductionDefect]
+    [rangeStats.componentWiseProductionDefect]
   );
 
   const pdirByPartChart = useMemo(
     () =>
-      [...componentWiseDefect]
+      [...rangeStats.componentWiseDefect]
         .sort((a, b) => toNum(b.totalRejected) - toNum(a.totalRejected))
         .slice(0, 10)
         .map((c) => ({
@@ -973,7 +1216,7 @@ export default function ReportsPage() {
           Checked: toNum(c.totalChecked),
           Rejected: toNum(c.totalRejected),
         })),
-    [componentWiseDefect]
+    [rangeStats.componentWiseDefect]
   );
 
   // ============================================================
@@ -983,6 +1226,13 @@ export default function ReportsPage() {
   const tabClass = (tab) =>
     `flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition ${
       activeTab === tab
+        ? "bg-teal-600 text-white shadow-sm"
+        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+    }`;
+
+  const presetBtnClass = (preset) =>
+    `px-3 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap ${
+      datePreset === preset
         ? "bg-teal-600 text-white shadow-sm"
         : "bg-gray-100 text-gray-600 hover:bg-gray-200"
     }`;
@@ -1021,6 +1271,84 @@ export default function ReportsPage() {
             Print Report
           </button>
         </div>
+      </div>
+
+      {/* DATE RANGE FILTER — Daily / Weekly / Monthly / Custom / All Time.
+          Applies to Overview, Production, Operator Wise, PDIR / Quality,
+          and Component Rejection tabs. Part Wise tab is exempt — see
+          banner in that tab. */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <CalendarDays size={18} className="text-teal-600" />
+            <div>
+              <h2 className="font-semibold text-gray-800 text-sm">Date Range</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Showing: <span className="font-medium text-teal-700">{rangeLabel}</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button className={presetBtnClass("all")} onClick={() => setDatePreset("all")}>
+              All Time
+            </button>
+            <button className={presetBtnClass("daily")} onClick={() => setDatePreset("daily")}>
+              Daily (Today)
+            </button>
+            <button className={presetBtnClass("weekly")} onClick={() => setDatePreset("weekly")}>
+              Weekly
+            </button>
+            <button className={presetBtnClass("monthly")} onClick={() => setDatePreset("monthly")}>
+              Monthly
+            </button>
+            <button className={presetBtnClass("custom")} onClick={() => setDatePreset("custom")}>
+              Custom
+            </button>
+          </div>
+        </div>
+
+        {datePreset === "custom" && (
+          <div className="flex flex-wrap items-end gap-3 mt-4 pt-4 border-t border-gray-100">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">From</label>
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">To</label>
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
+            {(customFrom || customTo) && (
+              <button
+                onClick={() => {
+                  setCustomFrom("");
+                  setCustomTo("");
+                }}
+                className="flex items-center gap-1 text-xs text-gray-500 hover:text-teal-600 pb-2"
+              >
+                <RotateCcw size={13} />
+                Clear dates
+              </button>
+            )}
+          </div>
+        )}
+
+        <p className="text-[11px] text-gray-400 mt-3">
+          This filters Production entries by their production Date, and PDIR
+          entries by when they were logged. Client-side on already-loaded
+          data — for very large date ranges on high-volume days, server-side
+          date filtering (with pagination) is the next planned step.
+        </p>
       </div>
 
       {/* GLOBAL SEARCH */}
@@ -1134,7 +1462,7 @@ export default function ReportsPage() {
                 <KpiCard icon={TrendingDown} title="Rejection Rate" value={`${overviewKpis.productionRejectionRate}%`} danger={overviewKpis.productionRejectionRate > 5} compact />
               </div>
               <p className="text-xs text-gray-500 mt-3">
-                Rejected ÷ Actual Production — pieces scrapped on the machine before inspection.
+                Rejected ÷ Actual Production — pieces scrapped on the machine before inspection. Range: {rangeLabel}
               </p>
             </div>
 
@@ -1162,7 +1490,8 @@ export default function ReportsPage() {
                 Monthly Production Performance
               </h2>
               <p className="text-sm text-gray-500 mb-6">
-                Target vs actual production vs production rejection, by month
+                Target vs actual production vs production rejection, by month — this
+                trend view shows all-time data regardless of the date filter above
               </p>
 
               {monthlyChartData.length > 0 ? (
@@ -1191,7 +1520,7 @@ export default function ReportsPage() {
                 PDIR Quality Performance
               </h2>
               <p className="text-sm text-gray-500 mb-4">
-                Accepted vs rejected quantity at inspection
+                Accepted vs rejected quantity at inspection — {rangeLabel}
               </p>
 
               {pdirQualityDonutData.length > 0 ? (
@@ -1215,7 +1544,7 @@ export default function ReportsPage() {
                   </ResponsiveContainer>
                 </div>
               ) : (
-                <EmptyState message="No PDIR quality data found." />
+                <EmptyState message="No PDIR quality data found for this range." />
               )}
             </div>
           </div>
@@ -1225,11 +1554,11 @@ export default function ReportsPage() {
       {/* ==================== PRODUCTION TAB ==================== */}
       {!loading && !error && activeTab === "production" && (
         <ReportTable
-          title="Detailed Production Report"
+          title={`Detailed Production Report — ${rangeLabel}`}
           headers={["Date", "Operator", "Component", "Part No", "Machine", "Shift", "Operation", "Target", "Actual", "Rejected", "Rejection Reasons", "Grade", ""]}
-          isEmpty={productionData.length === 0}
+          isEmpty={filteredProductionData.length === 0}
         >
-          {productionData.map((entry) => (
+          {filteredProductionData.map((entry) => (
             <tr
               key={entry._id}
               className="border-t hover:bg-gray-50 cursor-pointer"
@@ -1283,6 +1612,17 @@ export default function ReportsPage() {
       {/* ==================== PART WISE TAB ==================== */}
       {!loading && !error && activeTab === "parts" && (
         <div className="space-y-6">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+            <Info className="text-amber-600 shrink-0 mt-0.5" size={17} />
+            <p className="text-xs text-amber-800">
+              This tab shows <strong>all-time</strong> data and is not affected by the
+              date range filter above. Part Wise analysis merges Production and PDIR
+              records by component, which currently happens on the backend — adding
+              accurate date filtering here needs that merge to accept a date range
+              too, so it isn't duplicated (and potentially gotten wrong) on the frontend.
+            </p>
+          </div>
+
           {partHighlights ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
               <HighlightCard
@@ -1514,11 +1854,11 @@ export default function ReportsPage() {
               />
             </div>
           ) : (
-            <EmptyState message="No operator-wise data found." />
+            <EmptyState message="No operator-wise data found for this range." />
           )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <ChartCard title="Operator-wise Production &amp; Rejection" subtitle="Top 10 operators by production">
+            <ChartCard title="Operator-wise Production &amp; Rejection" subtitle={`Top 10 operators by production — ${rangeLabel}`}>
               {operatorProductionChart.length > 0 ? (
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1572,7 +1912,7 @@ export default function ReportsPage() {
           </div>
 
           <ReportTable
-            title="Operator Performance Ranking"
+            title={`Operator Performance Ranking — ${rangeLabel}`}
             headers={["Rank", "Operator", "Operator ID", "Entries", "Target", "Production", "Prod. Rejected", "Efficiency", "Rejection Rate", "Score", ""]}
             isEmpty={operatorRanking.length === 0}
           >
@@ -1701,7 +2041,7 @@ export default function ReportsPage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <ChartCard title="PDIR: Quantity Checked vs Rejected by Part" subtitle="Top 10 parts by rejected quantity">
+            <ChartCard title="PDIR: Quantity Checked vs Rejected by Part" subtitle={`Top 10 parts by rejected quantity — ${rangeLabel}`}>
               {pdirByPartChart.length > 0 ? (
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1717,17 +2057,17 @@ export default function ReportsPage() {
                   </ResponsiveContainer>
                 </div>
               ) : (
-                <EmptyState message="No PDIR part data found." />
+                <EmptyState message="No PDIR part data found for this range." />
               )}
             </ChartCard>
 
             <ChartCard title="PDIR Rejection Reason Distribution" subtitle="Share of rejected quantity by reason">
-              {rejectionReasonWise.length > 0 ? (
+              {rangeStats.rejectionReasonWise.length > 0 ? (
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <Pie data={rejectionReasonWise} dataKey="totalRejected" nameKey="rejectionReason" outerRadius={100}>
-                        {rejectionReasonWise.map((_, index) => (
+                      <Pie data={rangeStats.rejectionReasonWise} dataKey="totalRejected" nameKey="rejectionReason" outerRadius={100}>
+                        {rangeStats.rejectionReasonWise.map((_, index) => (
                           <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                         ))}
                       </Pie>
@@ -1737,17 +2077,17 @@ export default function ReportsPage() {
                   </ResponsiveContainer>
                 </div>
               ) : (
-                <EmptyState message="No rejection reason data found." />
+                <EmptyState message="No rejection reason data found for this range." />
               )}
             </ChartCard>
           </div>
 
           <ReportTable
-            title="Detailed PDIR Report"
+            title={`Detailed PDIR Report — ${rangeLabel}`}
             headers={["Date", "Part", "Part Number", "Production Reference", "Checking Operator", "Packing Operator", "Qty Checked", "Qty Rejected", "Rejection Reason", "Remarks", ""]}
-            isEmpty={pdirData.length === 0}
+            isEmpty={filteredPdirData.length === 0}
           >
-            {pdirData.map((entry) => {
+            {filteredPdirData.map((entry) => {
               const production = entry.productionBatch || entry.production;
               return (
                 <tr
@@ -1776,7 +2116,7 @@ export default function ReportsPage() {
       {/* ==================== COMPONENT REJECTION TAB ==================== */}
       {!loading && !error && activeTab === "rejection" && (
         <div className="space-y-8">
-          {/* ---------- COMPONENT REJECTION SEARCH (client-side, this tab only) ---------- */}
+          {/* ---------- COMPONENT REJECTION SEARCH (client-side text filter, on top of date range) ---------- */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div>
@@ -1784,10 +2124,9 @@ export default function ReportsPage() {
                   Filter Component Rejection Data
                 </h2>
                 <p className="text-xs text-gray-500 mt-1">
-                  Filters the tables below by component name, part number, or
-                  rejection reason. This is a local filter on already-loaded
-                  data — full date/shift/operator/machine filtering is
-                  planned server-side for high-volume days.
+                  Text-searches the tables below by component name, part
+                  number, or rejection reason, within the date range
+                  selected above ({rangeLabel}).
                 </p>
               </div>
               <div className="flex gap-2">
@@ -1833,7 +2172,7 @@ export default function ReportsPage() {
                 Component Rejection Analysis
               </h2>
               <span className="text-xs text-gray-400 font-normal">
-                (scrapped during machining — logged directly on each production entry)
+                (scrapped during machining — logged directly on each production entry) — {rangeLabel}
               </span>
             </div>
 
@@ -1845,13 +2184,13 @@ export default function ReportsPage() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <ChartCard title="Component Rejection Reason Distribution" subtitle="Share of rejected quantity by reason (machining stage) — overall, not affected by search above">
-                {productionRejectionReasonWise.length > 0 ? (
+              <ChartCard title="Component Rejection Reason Distribution" subtitle={`Share of rejected quantity by reason (machining stage) — ${rangeLabel}`}>
+                {rangeStats.productionRejectionReasonWise.length > 0 ? (
                   <div className="h-72">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
-                        <Pie data={productionRejectionReasonWise} dataKey="totalRejected" nameKey="rejectionReason" outerRadius={90}>
-                          {productionRejectionReasonWise.map((_, index) => (
+                        <Pie data={rangeStats.productionRejectionReasonWise} dataKey="totalRejected" nameKey="rejectionReason" outerRadius={90}>
+                          {rangeStats.productionRejectionReasonWise.map((_, index) => (
                             <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                           ))}
                         </Pie>
@@ -1861,11 +2200,11 @@ export default function ReportsPage() {
                     </ResponsiveContainer>
                   </div>
                 ) : (
-                  <EmptyState message="No production rejection reason data found." />
+                  <EmptyState message="No production rejection reason data found for this range." />
                 )}
               </ChartCard>
 
-              <ChartCard title="Top Rejected Parts — Component Stage" subtitle="Ranked by total rejected quantity — overall, not affected by search above">
+              <ChartCard title="Top Rejected Parts — Component Stage" subtitle={`Ranked by total rejected quantity — ${rangeLabel}`}>
                 {productionDefectByPartChart.length > 0 ? (
                   <div className="h-72">
                     <ResponsiveContainer width="100%" height="100%">
@@ -1881,7 +2220,7 @@ export default function ReportsPage() {
                     </ResponsiveContainer>
                   </div>
                 ) : (
-                  <EmptyState message="No production defect data found." />
+                  <EmptyState message="No production defect data found for this range." />
                 )}
               </ChartCard>
             </div>
@@ -1919,9 +2258,7 @@ export default function ReportsPage() {
                           ))}
                         </div>
                       ) : (
-                        <span className="text-gray-400 text-xs">
-                          Single-reason record (backend breakdown pending)
-                        </span>
+                        <span className="text-gray-400 text-xs">No rejections in this range</span>
                       )}
                     </TD>
                     <TD><RowViewButton onClick={() => openComponentProductionDetail(item)} /></TD>
@@ -1966,12 +2303,7 @@ export default function ReportsPage() {
 
           {/*
             PDIR rejection is intentionally NOT rendered in this tab.
-            It stays exclusively in the "PDIR / Quality" tab above —
-            componentWiseDefect, rejectionReasonWise, and
-            highestDefectReason are still fetched and available in
-            state, just not displayed here, per the split between
-            "Component Rejection" (machining stage) and
-            "PDIR / Quality" (inspection stage).
+            It stays exclusively in the "PDIR / Quality" tab above.
           */}
         </div>
       )}
@@ -2064,8 +2396,6 @@ function RowViewButton({ onClick, label = "View" }) {
 
 // ============================================================
 // GENERIC ROW DETAIL MODAL
-// Used for Production entries, PDIR entries, Operators, Components,
-// and Rejection Reasons. Takes { title, sections: [{ heading, danger, rows: [[label, value], ...] }] }
 // ============================================================
 
 function RowDetailModal({ record, onClose }) {
@@ -2122,8 +2452,6 @@ function RowDetailModal({ record, onClose }) {
 
 // ============================================================
 // PART DETAIL MODAL
-// Shows production rejection and PDIR rejection as two clearly
-// separated panels — never merged into one number or one list.
 // ============================================================
 
 function PartDetailModal({ part, onClose }) {

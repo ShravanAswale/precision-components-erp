@@ -52,6 +52,7 @@ export default function AddProduction() {
 
   const [grade, setGrade] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [operators, setOperators] = useState([]);
   const [machines, setMachines] = useState([]);
@@ -194,12 +195,18 @@ export default function AddProduction() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    // Prevent double submission
+    if (isSubmitting) return;
+
+    setIsSubmitting(true);
+
     const rejectedQty = Number(formData.qtyRejected || 0);
 
     // Validate rejection breakdown
     if (rejectedQty > 0) {
       if (formData.rejections.length === 0) {
         alert("Please add at least one rejection reason.");
+        setIsSubmitting(false);
         return;
       }
 
@@ -212,6 +219,7 @@ export default function AddProduction() {
         alert(
           "Please select a rejection reason and enter a valid quantity for every rejection."
         );
+        setIsSubmitting(false);
         return;
       }
 
@@ -221,6 +229,7 @@ export default function AddProduction() {
 
       if (new Set(duplicateReasons).size !== duplicateReasons.length) {
         alert("The same rejection reason cannot be added more than once.");
+        setIsSubmitting(false);
         return;
       }
 
@@ -228,6 +237,7 @@ export default function AddProduction() {
         alert(
           `Rejection quantity mismatch. Total rejected quantity is ${rejectedQty}, but the rejection reasons total ${totalRejectionBreakdown}.`
         );
+        setIsSubmitting(false);
         return;
       }
     }
@@ -261,6 +271,7 @@ export default function AddProduction() {
         navigate("/production");
       }, 1000);
     } catch (err) {
+      setIsSubmitting(false);
       alert(err.response?.data?.message || "Unable to save");
     }
   };
@@ -708,9 +719,10 @@ export default function AddProduction() {
         <div className="pt-4 flex justify-end">
           <button
             type="submit"
-            className="bg-teal-600 hover:bg-teal-700 text-white font-medium py-3 px-8 rounded-lg shadow-sm transition-colors"
+            disabled={isSubmitting}
+            className="bg-teal-600 hover:bg-teal-700 text-white font-medium py-3 px-8 rounded-lg shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Submit Entry
+            {isSubmitting ? "Submitting..." : "Submit Entry"}
           </button>
         </div>
       </form>

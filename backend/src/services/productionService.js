@@ -12,6 +12,9 @@ const calculateGrade = (actual) => {
 export const createProduction = async (data, createdBy) => {
   const production = await Production.create({
     ...data,
+    startQty: Number(data.startQty || 0),
+    exitQty: Number(data.exitQty || 0),
+    difference: Number(data.difference || 0),
     grade: calculateGrade(Number(data.actualProduction || 0)),
     createdBy,
   });
@@ -59,6 +62,16 @@ export const updateProduction = async (id, data) => {
   Object.keys(data).forEach((key) => {
     production[key] = data[key];
   });
+
+  // Recalculate difference if Start/Exit Qty changes
+  if (
+    data.startQty !== undefined ||
+    data.exitQty !== undefined
+  ) {
+    production.difference =
+      Number(production.exitQty || 0) -
+      Number(production.startQty || 0);
+  }
 
   // Always recalculate grade when production is updated
   production.grade = calculateGrade(

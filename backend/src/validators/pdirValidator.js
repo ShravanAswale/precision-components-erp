@@ -1,3 +1,38 @@
+const validateRejectionBreakdown = (qtyRejected, rejections = []) => {
+  const rejected = Number(qtyRejected || 0);
+
+  if (rejected === 0) return null;
+
+  if (!Array.isArray(rejections) || rejections.length === 0) {
+    return "Please add at least one rejection reason";
+  }
+
+  const invalid = rejections.some(
+    (item) => !item.reason || Number(item.qty || 0) <= 0
+  );
+
+  if (invalid) {
+    return "Every rejection must have a reason and valid quantity";
+  }
+
+  const reasons = rejections.map((item) => item.reason);
+
+  if (new Set(reasons).size !== reasons.length) {
+    return "Duplicate rejection reasons are not allowed";
+  }
+
+  const total = rejections.reduce(
+    (sum, item) => sum + Number(item.qty || 0),
+    0
+  );
+
+  if (total !== rejected) {
+    return `Rejection quantity mismatch. Total rejected quantity is ${rejected}, but breakdown totals ${total}`;
+  }
+
+  return null;
+};
+
 export const validateCreatePdir = (req, res, next) => {
   const {
     partName,
@@ -6,7 +41,7 @@ export const validateCreatePdir = (req, res, next) => {
     packingOperator,
     qtyChecked,
     qtyRejected,
-    rejectionReason,
+    rejections,
   } = req.body;
 
   // Required fields
@@ -26,7 +61,6 @@ export const validateCreatePdir = (req, res, next) => {
     });
   }
 
-  // Validate quantities
   const checked = Number(qtyChecked);
   const rejected = Number(qtyRejected || 0);
 
@@ -51,11 +85,12 @@ export const validateCreatePdir = (req, res, next) => {
     });
   }
 
-  // Rejection reason is mandatory when rejected quantity is greater than 0
-  if (rejected > 0 && !rejectionReason?.trim()) {
+  const rejectionError = validateRejectionBreakdown(rejected, rejections);
+
+  if (rejectionError) {
     return res.status(400).json({
       success: false,
-      message: "Type of Rejection is required when Quantity Rejected is greater than 0",
+      message: rejectionError,
     });
   }
 
@@ -70,7 +105,7 @@ export const validateUpdatePdir = (req, res, next) => {
     });
   }
 
-  const { qtyChecked, qtyRejected, rejectionReason } = req.body;
+  const { qtyChecked, qtyRejected, rejections } = req.body;
 
   if (
     qtyChecked !== undefined &&
@@ -103,16 +138,18 @@ export const validateUpdatePdir = (req, res, next) => {
     });
   }
 
-  if (
-    qtyRejected !== undefined &&
-    Number(qtyRejected) > 0 &&
-    rejectionReason !== undefined &&
-    !rejectionReason?.trim()
-  ) {
-    return res.status(400).json({
-      success: false,
-      message: "Type of Rejection is required when Quantity Rejected is greater than 0",
-    });
+  if (qtyRejected !== undefined) {
+    const rejectionError = validateRejectionBreakdown(
+      Number(qtyRejected),
+      rejections
+    );
+
+    if (rejectionError) {
+      return res.status(400).json({
+        success: false,
+        message: rejectionError,
+      });
+    }
   }
 
   next();

@@ -5,6 +5,7 @@ import userRoutes from "./userRoutes.js";
 import operatorRoutes from "./operatorRoutes.js";
 import machineRoutes from "./machineRoutes.js";
 import componentRoutes from "./componentRoutes.js";
+import rejectionReasonRoutes from "./rejectionReasonRoutes.js";
 import shiftRoutes from "./shiftRoutes.js";
 import productionRoutes from "./productionRoutes.js";
 import pdirRoutes from "./pdirRoutes.js";
@@ -31,6 +32,7 @@ router.use("/users", userRoutes);
 router.use("/operators", operatorRoutes);
 router.use("/machines", machineRoutes);
 router.use("/components", componentRoutes);
+router.use("/rejection-reasons", rejectionReasonRoutes);
 router.use("/shifts", shiftRoutes);
 
 // Production Modules

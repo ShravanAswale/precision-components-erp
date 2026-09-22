@@ -1,8 +1,57 @@
 import PDIR from "../models/PDIR.js";
 import ApiError from "../utils/ApiError.js";
 
+// Validate rejection breakdown
+const validateRejections = (data) => {
+  const rejectedQty = Number(data.qtyRejected || 0);
+  const rejections = data.rejections || [];
+
+  if (rejectedQty === 0) {
+    data.rejections = [];
+    return;
+  }
+
+  if (rejections.length === 0) {
+    throw new ApiError(400, "Please add at least one rejection reason.");
+  }
+
+  const invalid = rejections.some(
+    (item) => !item.reason || Number(item.qty || 0) <= 0
+  );
+
+  if (invalid) {
+    throw new ApiError(
+      400,
+      "Every rejection must have a reason and valid quantity."
+    );
+  }
+
+  const reasons = rejections.map((item) => item.reason);
+
+  if (new Set(reasons).size !== reasons.length) {
+    throw new ApiError(
+      400,
+      "Duplicate rejection reasons are not allowed."
+    );
+  }
+
+  const total = rejections.reduce(
+    (sum, item) => sum + Number(item.qty || 0),
+    0
+  );
+
+  if (total !== rejectedQty) {
+    throw new ApiError(
+      400,
+      `Rejection quantity mismatch. Total rejected quantity is ${rejectedQty}, but rejection breakdown totals ${total}.`
+    );
+  }
+};
+
 // Create PDIR
 export const createPdir = async (data, createdBy) => {
+  validateRejections(data);
+
   const pdir = await PDIR.create({
     ...data,
     createdBy,
@@ -55,6 +104,8 @@ export const updatePdir = async (id, data) => {
   if (!pdir) {
     throw new ApiError(404, "PDIR not found");
   }
+
+  validateRejections(data);
 
   Object.assign(pdir, data);
 

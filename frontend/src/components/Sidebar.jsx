@@ -15,6 +15,7 @@ import {
   Wrench,
   ShieldCheck,
   Bell,
+  AlertTriangle,
 } from "lucide-react";
 
 export default function Sidebar() {
@@ -81,6 +82,8 @@ export default function Sidebar() {
       label: "Notifications",
       notification: true,
     },
+
+    // Masters
     {
       to: "/machines",
       icon: Cpu,
@@ -95,6 +98,11 @@ export default function Sidebar() {
       to: "/components",
       icon: Layers,
       label: "Components",
+    },
+    {
+      to: "/rejection-reasons",
+      icon: AlertTriangle,
+      label: "Rejection Reasons",
     },
     {
       to: "/users",

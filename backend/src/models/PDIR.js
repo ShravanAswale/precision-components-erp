@@ -1,5 +1,21 @@
 import mongoose from "mongoose";
 
+const rejectionSchema = new mongoose.Schema(
+  {
+    reason: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    qty: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+  },
+  { _id: false }
+);
+
 const pdirSchema = new mongoose.Schema(
   {
     // Direct link to Component Master
@@ -22,12 +38,10 @@ const pdirSchema = new mongoose.Schema(
       trim: true,
     },
 
-    // Production link is now optional.
-    // Keeping it prevents old PDIR records from breaking.
+    // Optional Production Link
     production: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Production",
-      required: false,
       default: null,
     },
 
@@ -55,11 +69,10 @@ const pdirSchema = new mongoose.Schema(
       min: 0,
     },
 
-    // Keep same field name for Reports
-    rejectionReason: {
-      type: String,
-      trim: true,
-      default: "",
+    // NEW: Multiple rejection reasons
+    rejections: {
+      type: [rejectionSchema],
+      default: [],
     },
 
     remarks: {

@@ -48,7 +48,6 @@ export default function ProductionList() {
 
       await api.delete(`/productions/${id}`);
 
-      // Remove deleted entry immediately from UI
       setEntries((previousEntries) =>
         previousEntries.filter((entry) => entry._id !== id)
       );
@@ -82,28 +81,12 @@ export default function ProductionList() {
 
   // Grade Colors
   const gradeColors = {
-    A: {
-      bg: "#dcfce7",
-      text: "#166534",
-    },
-
-    B: {
-      bg: "#dbeafe",
-      text: "#1e40af",
-    },
-
-    C: {
-      bg: "#fef3c7",
-      text: "#92400e",
-    },
-
-    D: {
-      bg: "#fee2e2",
-      text: "#991b1b",
-    },
+    A: { bg: "#dcfce7", text: "#166534" },
+    B: { bg: "#dbeafe", text: "#1e40af" },
+    C: { bg: "#fef3c7", text: "#92400e" },
+    D: { bg: "#fee2e2", text: "#991b1b" },
   };
 
-  // Loading State
   if (loading) {
     return (
       <div className="p-6 text-center text-gray-500">
@@ -114,10 +97,8 @@ export default function ProductionList() {
 
   return (
     <div className="p-6">
-
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
-
         <h1 className="text-2xl font-bold text-gray-800">
           Production & Rejection Logs
         </h1>
@@ -128,12 +109,10 @@ export default function ProductionList() {
         >
           + New Production Entry
         </Link>
-
       </div>
 
       {/* Filters */}
       <div className="flex gap-3 mb-5">
-
         <button
           onClick={() => setFilter("all")}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -166,79 +145,41 @@ export default function ProductionList() {
         >
           Rejections
         </button>
-
       </div>
 
       {/* Production Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
-
         <table className="min-w-full divide-y divide-gray-200">
-
           <thead className="bg-gray-50">
-
             <tr>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Operator</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Part</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Shift</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Machine</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Target</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actual</th>
 
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Date
-              </th>
+              {/* NEW */}
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Qty</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Exit Qty</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Difference</th>
 
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Operator
-              </th>
-
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Part
-              </th>
-
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Shift
-              </th>
-
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Machine
-              </th>
-
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Target
-              </th>
-
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Actual
-              </th>
-
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Rejected
-              </th>
-
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Grade
-              </th>
-
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Actions
-              </th>
-
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rejected</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Grade</th>
+              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
-
           </thead>
 
           <tbody className="divide-y divide-gray-200">
-
             {filteredEntries.length === 0 ? (
-
               <tr>
-                <td
-                  colSpan="10"
-                  className="px-4 py-8 text-center text-gray-500"
-                >
+                <td colSpan="13" className="px-4 py-8 text-center text-gray-500">
                   No production entries found.
                 </td>
               </tr>
-
             ) : (
-
               filteredEntries.map((entry) => {
-
                 const grade =
                   entry.grade ||
                   calculateGrade(entry.actualProduction);
@@ -250,65 +191,62 @@ export default function ProductionList() {
                   };
 
                 return (
-
                   <tr
                     key={entry._id || entry.id}
                     className="hover:bg-gray-50 transition-colors"
                   >
-
-                    {/* Date */}
                     <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
                       {entry.date
                         ? new Date(entry.date).toLocaleDateString()
                         : "-"}
                     </td>
 
-                    {/* Operator */}
                     <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {entry.operator?.name || "-"}
                     </td>
 
-                    {/* Component */}
                     <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
-
                       {entry.component?.componentName || "-"}
-
                       <br />
-
                       <span className="text-xs text-gray-500">
                         {entry.component?.partNumber || ""}
                       </span>
-
                     </td>
 
-                    {/* Shift */}
                     <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
                       {entry.shift || "-"}
                     </td>
 
-                    {/* Machine */}
                     <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
                       {entry.machine?.machineName || "-"}
                     </td>
 
-                    {/* Target */}
                     <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
                       {entry.targetProduction || 0}
                     </td>
 
-                    {/* Actual */}
                     <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {entry.actualProduction || 0}
                     </td>
 
-                    {/* Rejected */}
+                    {/* NEW */}
+                    <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {entry.startQty ?? 0}
+                    </td>
+
+                    <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {entry.exitQty ?? 0}
+                    </td>
+
+                    <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-teal-700">
+                      {entry.difference ?? 0}
+                    </td>
+
                     <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
                       {entry.rejectedQty || 0}
                     </td>
 
-                    {/* Grade */}
                     <td className="px-4 py-4 whitespace-nowrap text-sm">
-
                       <span
                         style={{
                           backgroundColor: gc.bg,
@@ -318,12 +256,9 @@ export default function ProductionList() {
                       >
                         Grade {grade}
                       </span>
-
                     </td>
 
-                    {/* Actions */}
                     <td className="px-4 py-4 whitespace-nowrap text-right text-sm font-medium">
-
                       <Link
                         to={`/production/edit/${entry._id || entry.id}`}
                         className="text-teal-600 hover:text-teal-900 mr-4"
@@ -341,22 +276,14 @@ export default function ProductionList() {
                           ? "Deleting..."
                           : "Delete"}
                       </button>
-
                     </td>
-
                   </tr>
-
                 );
               })
-
             )}
-
           </tbody>
-
         </table>
-
       </div>
-
     </div>
   );
 }

@@ -8,13 +8,17 @@ export default function AddProduction() {
   const { user } = useAuth();
   const navigate = useNavigate();
 
+  // Step 1: Updated formData
   const [formData, setFormData] = useState({
     operator: "",
     partName: "",
     partNo: "",
     date: new Date().toISOString().split("T")[0],
-    shift: "Morning",
+    shift: "",
     machine: "",
+    startQty: "",
+    exitQty: "",
+    difference: "",
     opn: "",
     cycleTime: "",
     machineRunTime: "",
@@ -25,30 +29,7 @@ export default function AddProduction() {
     remarks: "",
   });
 
-  const rejectionTypes = [
-    "TOTAL LENGTH UNDERSIZE",
-    "TOTAL LENGTH OVERSIZE",
-    "OD UNDERSIZE",
-    "OD OVERSIZE",
-    "GROOVE OD OVERSIZE",
-    "GROOVE UNEVEN",
-    "GROOVE OD UNDERSIZE",
-    "ROUGH SURFACE FINISH",
-    "R/M PROBLEM",
-    "ROD BEND",
-    "PLATTING",
-    "ID OVERSIZE",
-    "ID UNDERSIZE",
-    "THREADING GO NC",
-    "THREADING NO-GO PASS",
-    "CHAMFER OUT",
-    "DRILL OUT",
-    "FACE UNEVEN",
-    "FLAT THREAD",
-    "DRILL DEPTH UNDERSIZE",
-    "DRILL DEPTH OVERSIZE",
-    "TOOL MARK ON OD",
-  ];
+  const [rejectionReasons, setRejectionReasons] = useState([]);
 
   const [grade, setGrade] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -64,6 +45,7 @@ export default function AddProduction() {
     fetchOperators();
     fetchMachines();
     fetchComponents();
+    fetchRejectionReasons();
   }, []);
 
   useEffect(() => {
@@ -97,18 +79,29 @@ export default function AddProduction() {
     }
   };
 
+  const fetchRejectionReasons = async () => {
+    try {
+      const res = await api.get("/rejection-reasons");
+
+      setRejectionReasons(
+        res.data.data.rejectionReasons.filter(
+          (reason) => reason.status === true
+        )
+      );
+    } catch (err) {
+      console.log(err);
+    }
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
 
+    // Step 2: Stop auto-filling Shift
     if (name === "operator") {
-      const selected = operators.find((op) => op._id === value);
-
       setFormData((prev) => ({
         ...prev,
         operator: value,
-        shift: selected?.shift || "",
       }));
-
       return;
     }
 
@@ -132,12 +125,20 @@ export default function AddProduction() {
     const cycleTime = Number(updatedData.cycleTime);
     const machineRunTime = Number(updatedData.machineRunTime);
 
+    // Step 3: Update calculation logic for target production
     if (cycleTime > 0 && machineRunTime > 0) {
-      updatedData.targetProd = Math.floor(
-        (machineRunTime * 60) / cycleTime
-      );
+      updatedData.targetProd = ((machineRunTime * 60) / cycleTime).toFixed(2);
     } else {
       updatedData.targetProd = "";
+    }
+
+    // Step 3: Calculation logic for quantity difference
+    const start = Number(updatedData.startQty || 0);
+    const exit = Number(updatedData.exitQty || 0);
+    if (updatedData.startQty !== "" && updatedData.exitQty !== "") {
+      updatedData.difference = (exit - start).toFixed(2);
+    } else {
+      updatedData.difference = "";
     }
 
     // If rejected quantity becomes 0, remove all rejection breakdowns.
@@ -254,6 +255,10 @@ export default function AddProduction() {
         machineRunTime: Number(formData.machineRunTime),
         targetProduction: Number(formData.targetProd),
         actualProduction: Number(formData.actualProd),
+        // Step 7: Send new values to backend
+        startQty: Number(formData.startQty),
+        exitQty: Number(formData.exitQty),
+        difference: Number(formData.difference),
         rejectedQty,
         rejections:
           rejectedQty > 0
@@ -369,17 +374,24 @@ export default function AddProduction() {
 
         {/* Shift + Machine + OPN */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-gray-100">
+          {/* Step 4: Make Shift manual dropdown */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Shift
             </label>
 
-            <input
-              type="text"
+            <select
+              name="shift"
               value={formData.shift}
-              readOnly
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg bg-gray-100 focus:outline-none text-gray-600"
-            />
+              onChange={handleChange}
+              required
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+            >
+              <option value="">Select Shift</option>
+              <option value="Morning">Morning</option>
+              <option value="Evening">Evening</option>
+              <option value="Night">Night</option>
+            </select>
           </div>
 
           <div>
@@ -460,14 +472,17 @@ export default function AddProduction() {
         </div>
 
         {/* Production Details */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4 border-t border-gray-100">
+        {/* Step 5: Changed layout grid to lg:grid-cols-7 */}
+        <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-6 pt-4 border-t border-gray-100">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Cycle Time (s)
             </label>
 
+            {/* Step 6: Step="0.01" added */}
             <input
               type="number"
+              step="0.01"
               name="cycleTime"
               value={formData.cycleTime}
               onChange={handleChange}
@@ -481,8 +496,10 @@ export default function AddProduction() {
               Machine Run Time
             </label>
 
+            {/* Step 6: Step="0.01" added */}
             <input
               type="number"
+              step="0.01"
               name="machineRunTime"
               value={formData.machineRunTime}
               onChange={handleChange}
@@ -517,6 +534,52 @@ export default function AddProduction() {
               onChange={handleChange}
               required
               className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 font-semibold"
+            />
+          </div>
+
+          {/* Step 5: Start Qty, Exit Qty & Difference added */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Start Qty
+            </label>
+
+            <input
+              type="number"
+              step="0.01"
+              name="startQty"
+              value={formData.startQty}
+              onChange={handleChange}
+              required
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Exit Qty
+            </label>
+
+            <input
+              type="number"
+              step="0.01"
+              name="exitQty"
+              value={formData.exitQty}
+              onChange={handleChange}
+              required
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Difference
+            </label>
+
+            <input
+              type="number"
+              value={formData.difference}
+              readOnly
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg bg-gray-100"
             />
           </div>
         </div>
@@ -626,13 +689,13 @@ export default function AddProduction() {
                           Select Type of Rejection
                         </option>
 
-                        {rejectionTypes.map((type) => (
+                        {rejectionReasons.map((reason) => (
                           <option
-                            key={type}
-                            value={type}
-                            disabled={selectedReasons.includes(type)}
+                            key={reason._id}
+                            value={reason.reasonName}
+                            disabled={selectedReasons.includes(reason.reasonName)}
                           >
-                            {type}
+                            {reason.reasonName}
                           </option>
                         ))}
                       </select>
@@ -676,7 +739,7 @@ export default function AddProduction() {
                 type="button"
                 onClick={addRejection}
                 disabled={
-                  formData.rejections.length >= rejectionTypes.length
+                  formData.rejections.length >= rejectionReasons.length
                 }
                 className="w-full border-2 border-dashed border-teal-300 text-teal-600 hover:bg-teal-50 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >

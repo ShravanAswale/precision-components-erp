@@ -21,6 +21,7 @@ export default function PDIRPage() {
   const [modalMode, setModalMode] = useState(null);
   const [selectedRecord, setSelectedRecord] = useState(null);
 
+  // CHANGE 1: Updated initialFormData (replaced rejectionReason with rejections array)
   const initialFormData = {
     component: "",
     partName: "",
@@ -29,37 +30,14 @@ export default function PDIRPage() {
     packingOperator: "",
     qtyChecked: "",
     qtyRejected: "0",
-    rejectionReason: "",
+    rejections: [],
     remarks: "",
   };
 
   const [formData, setFormData] = useState(initialFormData);
 
-  // Same rejection types used in Production Entry
-  const rejectionReasons = [
-    "TOTAL LENGTH UNDERSIZE",
-    "TOTAL LENGTH OVERSIZE",
-    "OD UNDERSIZE",
-    "OD OVERSIZE",
-    "GROOVE OD OVERSIZE",
-    "GROOVE UNEVEN",
-    "GROOVE OD UNDERSIZE",
-    "ROUGH SURFACE FINISH",
-    "R/M PROBLEM",
-    "ROD BEND",
-    "PLATTING",
-    "ID OVERSIZE",
-    "ID UNDERSIZE",
-    "THREADING GO NC",
-    "THREADING NO-GO PASS",
-    "CHAMFER OUT",
-    "DRILL OUT",
-    "FACE UNEVEN",
-    "FLAT THREAD",
-    "DRILL DEPTH UNDERSIZE",
-    "DRILL DEPTH OVERSIZE",
-    "TOOL MARK ON OD",
-  ];
+  // Dynamic state for rejection reasons loaded from backend API
+  const [rejectionReasons, setRejectionReasons] = useState([]);
 
   // ==========================================
   // INITIAL DATA
@@ -69,6 +47,7 @@ export default function PDIRPage() {
     fetchPdirRecords();
     fetchOperators();
     fetchComponents();
+    fetchRejectionReasons();
   }, []);
 
   // ==========================================
@@ -119,6 +98,24 @@ export default function PDIRPage() {
       console.error("Error loading components:", err);
 
       setComponents([]);
+    }
+  };
+
+  // ==========================================
+  // FETCH REJECTION REASONS
+  // ==========================================
+
+  const fetchRejectionReasons = async () => {
+    try {
+      const res = await api.get("/rejection-reasons");
+
+      setRejectionReasons(
+        res.data.data.rejectionReasons.filter(
+          (reason) => reason.status === true
+        )
+      );
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -180,7 +177,8 @@ export default function PDIRPage() {
           record.packingOperator?._id || record.packingOperator || "",
         qtyChecked: record.qtyChecked ?? "",
         qtyRejected: record.qtyRejected ?? "0",
-        rejectionReason: record.rejectionReason || "",
+        // CHANGE 4: Update Edit Modal data
+        rejections: record.rejections || [],
         remarks: record.remarks || "",
       });
     } else {
@@ -208,16 +206,46 @@ export default function PDIRPage() {
     }));
   };
 
+  // CHANGE 2: Helper functions for rejection rows
+  const addRejectionRow = () => {
+    setFormData((prev) => ({
+      ...prev,
+      rejections: [...prev.rejections, { reason: "", qty: "" }],
+    }));
+  };
+
+  const updateRejection = (index, field, value) => {
+    const updated = [...formData.rejections];
+    updated[index][field] = value;
+
+    setFormData((prev) => ({
+      ...prev,
+      rejections: updated,
+    }));
+  };
+
+  const removeRejection = (index) => {
+    setFormData((prev) => ({
+      ...prev,
+      rejections: prev.rejections.filter((_, i) => i !== index),
+    }));
+  };
+
+  const totalRejectionBreakdown = formData.rejections.reduce(
+    (sum, item) => sum + Number(item.qty || 0),
+    0
+  );
+
   // ==========================================
   // REJECTED QTY
   // ==========================================
 
+  // CHANGE 3: Updated handleRejectedQtyChange
   const handleRejectedQtyChange = (value) => {
     setFormData((prev) => ({
       ...prev,
       qtyRejected: value,
-      rejectionReason:
-        Number(value) > 0 ? prev.rejectionReason : "",
+      rejections: Number(value) > 0 ? prev.rejections : [],
     }));
   };
 
@@ -248,11 +276,27 @@ export default function PDIRPage() {
       return;
     }
 
-    if (rejectedQty > 0 && !formData.rejectionReason) {
-      alert("Please select Type of Rejection.");
-      return;
+    // CHANGE 5: Updated Validation
+    if (rejectedQty > 0) {
+      if (formData.rejections.length === 0) {
+        alert("Please add at least one rejection reason.");
+        return;
+      }
+
+      const total = formData.rejections.reduce(
+        (sum, item) => sum + Number(item.qty || 0),
+        0
+      );
+
+      if (total !== rejectedQty) {
+        alert(
+          `Rejection breakdown total (${total}) must equal rejected quantity (${rejectedQty}).`
+        );
+        return;
+      }
     }
 
+    // CHANGE 6: Updated Payload
     const payload = {
       component: formData.component,
       partName: formData.partName,
@@ -261,8 +305,7 @@ export default function PDIRPage() {
       packingOperator: formData.packingOperator,
       qtyChecked: checkedQty,
       qtyRejected: rejectedQty,
-      rejectionReason:
-        rejectedQty > 0 ? formData.rejectionReason : "",
+      rejections: rejectedQty > 0 ? formData.rejections : [],
       remarks: formData.remarks,
     };
 
@@ -534,11 +577,20 @@ export default function PDIRPage() {
 
                   <td className="px-4 py-4 text-sm">
 
-                    <span className="font-semibold block">
-                      {record.rejectionReason || "-"}
-                    </span>
+                    {/* CHANGE 8: Updated Table Display */}
+                    <div className="space-y-1">
+                      {record.rejections?.length ? (
+                        record.rejections.map((r, i) => (
+                          <div key={i} className="text-xs">
+                            <span className="font-medium">{r.reason}</span> ({r.qty})
+                          </div>
+                        ))
+                      ) : (
+                        <span>-</span>
+                      )}
+                    </div>
 
-                    <span className="text-gray-400 text-xs">
+                    <span className="text-gray-400 text-xs block mt-1">
                       {record.remarks || "-"}
                     </span>
 
@@ -797,44 +849,70 @@ export default function PDIRPage() {
 
               </div>
 
-              {/* REJECTION TYPE */}
+              {/* CHANGE 7: Replace the Rejection UI */}
 
               {Number(formData.qtyRejected) > 0 && (
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <label className="text-sm font-medium">
+                      Type of Rejection *
+                    </label>
 
-                <div>
+                    <button
+                      type="button"
+                      onClick={addRejectionRow}
+                      className="text-xs bg-teal-600 text-white px-2 py-1 rounded"
+                    >
+                      + Add
+                    </button>
+                  </div>
 
-                  <label className="block text-sm mb-1">
-                    Type of Rejection *
-                  </label>
-
-                  <select
-                    required
-                    value={formData.rejectionReason}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        rejectionReason:
-                          e.target.value,
-                      }))
-                    }
-                    className="w-full px-4 py-2 border rounded-lg bg-white"
-                  >
-                    <option value="">
-                      Select Type of Rejection
-                    </option>
-
-                    {rejectionReasons.map((reason) => (
-                      <option
-                        key={reason}
-                        value={reason}
+                  {formData.rejections.map((item, index) => (
+                    <div key={index} className="flex gap-2">
+                      <select
+                        value={item.reason}
+                        onChange={(e) =>
+                          updateRejection(index, "reason", e.target.value)
+                        }
+                        className="flex-1 px-3 py-2 border rounded-lg"
                       >
-                        {reason}
-                      </option>
-                    ))}
-                  </select>
+                        <option value="">Select Reason</option>
 
+                        {rejectionReasons.map((reason) => (
+                          <option
+                            key={reason._id}
+                            value={reason.reasonName}
+                          >
+                            {reason.reasonName}
+                          </option>
+                        ))}
+                      </select>
+
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="Qty"
+                        value={item.qty}
+                        onChange={(e) =>
+                          updateRejection(index, "qty", e.target.value)
+                        }
+                        className="w-24 px-3 py-2 border rounded-lg"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => removeRejection(index)}
+                        className="text-red-600 px-2"
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
+                  ))}
+
+                  <p className="text-xs text-gray-500">
+                    Breakdown: {totalRejectionBreakdown} / {formData.qtyRejected}
+                  </p>
                 </div>
-
               )}
 
               {/* REMARKS */}
@@ -928,11 +1006,19 @@ export default function PDIRPage() {
               {selectedRecord.qtyRejected}
             </p>
 
-            <p>
+            {/* CHANGE 9: Update View Modal */}
+            <div>
               <strong>Type of Rejection:</strong>{" "}
-              {selectedRecord.rejectionReason ||
-                "-"}
-            </p>
+              {selectedRecord.rejections?.length ? (
+                selectedRecord.rejections.map((r, i) => (
+                  <div key={i} className="ml-2 text-sm text-gray-700">
+                    • {r.reason} ({r.qty})
+                  </div>
+                ))
+              ) : (
+                <span>-</span>
+              )}
+            </div>
 
             <p>
               <strong>Remarks:</strong>{" "}

@@ -68,6 +68,20 @@ const productionSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    startQty: {
+  type: Number,
+  required: true,
+},
+
+exitQty: {
+  type: Number,
+  required: true,
+},
+
+difference: {
+  type: Number,
+  required: true,
+},
 
     // NEW — was being sent by AddProduction.jsx but silently dropped
     // because it didn't exist on the schema. This is what makes a

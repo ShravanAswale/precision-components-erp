@@ -48,42 +48,8 @@ export const updateGage = async (id, data) => {
     throw new ApiError(404, "Gage not found");
   }
 
-  // Update all editable fields
+  // User has full control — no automatic status changes, save exactly what was sent
   Object.assign(gage, data);
-
-  /**
-   * Sent For Repair
-   */
-  if (data.sentForRepair === true) {
-    gage.sentForRepair = true;
-    gage.status = "Under Repair";
-
-    if (!gage.sentForRepairDate) {
-      gage.sentForRepairDate = new Date();
-    }
-  }
-
-  /**
-   * Received Back
-   */
-  if (data.receivedDate) {
-    gage.receivedDate = data.receivedDate;
-    gage.sentForRepair = false;
-    gage.status = "Available";
-  }
-
-  /**
-   * Calibration Completed
-   * If a future calibration due date is entered,
-   * the gage becomes available again.
-   */
-  if (data.calibrationDueDate) {
-    const dueDate = new Date(data.calibrationDueDate);
-
-    if (dueDate > new Date()) {
-      gage.status = "Available";
-    }
-  }
 
   await gage.save();
 

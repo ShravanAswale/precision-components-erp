@@ -46,15 +46,21 @@ const pdirSchema = new mongoose.Schema(
     },
 
     checkingOperator: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Operator",
-      required: true,
+      // Changed to array to support multiple checking operators
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Operator" }],
+      validate: {
+        validator: (arr) => Array.isArray(arr) && arr.length > 0,
+        message: "At least one checking operator is required",
+      },
     },
 
     packingOperator: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Operator",
-      required: true,
+      // Changed to array to support multiple packing operators
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Operator" }],
+      validate: {
+        validator: (arr) => Array.isArray(arr) && arr.length > 0,
+        message: "At least one packing operator is required",
+      },
     },
 
     qtyChecked: {

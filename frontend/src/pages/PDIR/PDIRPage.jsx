@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import api from "../../services/api";
+import SearchableSelect from "../../components/SearchableSelect";
 
 export default function PDIRPage() {
   const [records, setRecords] = useState([]);
@@ -26,8 +27,8 @@ export default function PDIRPage() {
     component: "",
     partName: "",
     partNumber: "",
-    checkingOperator: "",
-    packingOperator: "",
+    checkingOperator: [],
+    packingOperator: [],
     qtyChecked: "",
     qtyRejected: "0",
     rejections: [],
@@ -171,10 +172,18 @@ export default function PDIRPage() {
         component: record.component?._id || record.component || "",
         partName: record.partName || "",
         partNumber: record.partNumber || "",
-        checkingOperator:
-          record.checkingOperator?._id || record.checkingOperator || "",
-        packingOperator:
-          record.packingOperator?._id || record.packingOperator || "",
+        // Normalise checkingOperator to array — handles legacy single-value records
+        checkingOperator: Array.isArray(record.checkingOperator)
+          ? record.checkingOperator.map((op) => op?._id || op)
+          : record.checkingOperator
+          ? [record.checkingOperator?._id || record.checkingOperator]
+          : [],
+        // Normalise packingOperator to array — handles legacy single-value records
+        packingOperator: Array.isArray(record.packingOperator)
+          ? record.packingOperator.map((op) => op?._id || op)
+          : record.packingOperator
+          ? [record.packingOperator?._id || record.packingOperator]
+          : [],
         qtyChecked: record.qtyChecked ?? "",
         qtyRejected: record.qtyRejected ?? "0",
         // CHANGE 4: Update Edit Modal data
@@ -308,8 +317,6 @@ export default function PDIRPage() {
       rejections: rejectedQty > 0 ? formData.rejections : [],
       remarks: formData.remarks,
     };
-
-    console.log("PDIR Payload:", payload);
 
     try {
       if (modalMode === "add") {
@@ -555,14 +562,16 @@ export default function PDIRPage() {
 
                     <span className="block">
                       Check:{" "}
-                      {record.checkingOperator?.name ||
-                        "Unassigned"}
+                      {Array.isArray(record.checkingOperator) && record.checkingOperator.length > 0
+                        ? record.checkingOperator.map((op) => op?.name || op).join(", ")
+                        : record.checkingOperator?.name || "Unassigned"}
                     </span>
 
                     <span className="text-gray-400 text-xs">
                       Pack:{" "}
-                      {record.packingOperator?.name ||
-                        "Unassigned"}
+                      {Array.isArray(record.packingOperator) && record.packingOperator.length > 0
+                        ? record.packingOperator.map((op) => op?.name || op).join(", ")
+                        : record.packingOperator?.name || "Unassigned"}
                     </span>
 
                   </td>
@@ -727,7 +736,7 @@ export default function PDIRPage() {
 
               <div className="grid grid-cols-2 gap-4">
 
-                {/* CHECKING OPERATOR */}
+                {/* CHECKING OPERATOR — multi-select */}
 
                 <div>
 
@@ -735,31 +744,24 @@ export default function PDIRPage() {
                     Checking Operator *
                   </label>
 
-                  <select
-                    required
+                  {/* Multi-select searchable dropdown for checking operators */}
+                  <SearchableSelect
+                    name="checkingOperator"
+                    multiple
                     value={formData.checkingOperator}
-                    onChange={(e) =>
+                    onChange={(vals) =>
                       setFormData((prev) => ({
                         ...prev,
-                        checkingOperator:
-                          e.target.value,
+                        checkingOperator: vals,
                       }))
                     }
-                    className="w-full px-4 py-2 border rounded-lg bg-white"
-                  >
-                    <option value="">
-                      Select Checker
-                    </option>
-
-                    {operators.map((operator) => (
-                      <option
-                        key={operator._id}
-                        value={operator._id}
-                      >
-                        {operator.name}
-                      </option>
-                    ))}
-                  </select>
+                    options={operators.map((op) => ({
+                      value: op._id,
+                      label: op.name,
+                    }))}
+                    placeholder="Select Checker(s)"
+                    required
+                  />
 
                 </div>
 
@@ -771,31 +773,24 @@ export default function PDIRPage() {
                     Packing Operator *
                   </label>
 
-                  <select
-                    required
+                  {/* Multi-select searchable dropdown for packing operators */}
+                  <SearchableSelect
+                    name="packingOperator"
+                    multiple
                     value={formData.packingOperator}
-                    onChange={(e) =>
+                    onChange={(vals) =>
                       setFormData((prev) => ({
                         ...prev,
-                        packingOperator:
-                          e.target.value,
+                        packingOperator: vals,
                       }))
                     }
-                    className="w-full px-4 py-2 border rounded-lg bg-white"
-                  >
-                    <option value="">
-                      Select Packer
-                    </option>
-
-                    {operators.map((operator) => (
-                      <option
-                        key={operator._id}
-                        value={operator._id}
-                      >
-                        {operator.name}
-                      </option>
-                    ))}
-                  </select>
+                    options={operators.map((op) => ({
+                      value: op._id,
+                      label: op.name,
+                    }))}
+                    placeholder="Select Packer(s)"
+                    required
+                  />
 
                 </div>
 
@@ -986,14 +981,16 @@ export default function PDIRPage() {
 
             <p>
               <strong>Checking Operator:</strong>{" "}
-              {selectedRecord.checkingOperator?.name ||
-                "-"}
+              {Array.isArray(selectedRecord.checkingOperator) && selectedRecord.checkingOperator.length > 0
+                ? selectedRecord.checkingOperator.map((op) => op?.name || op).join(", ")
+                : selectedRecord.checkingOperator?.name || "-"}
             </p>
 
             <p>
               <strong>Packing Operator:</strong>{" "}
-              {selectedRecord.packingOperator?.name ||
-                "-"}
+              {Array.isArray(selectedRecord.packingOperator) && selectedRecord.packingOperator.length > 0
+                ? selectedRecord.packingOperator.map((op) => op?.name || op).join(", ")
+                : selectedRecord.packingOperator?.name || "-"}
             </p>
 
             <p>

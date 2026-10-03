@@ -3,6 +3,7 @@ export const validateCreateGage = (req, res, next) => {
     gageName,
     gageNumber,
     issueDate,
+    calibrationPeriod, // Added as required field
     calibrationDueDate,
   } = req.body;
 
@@ -10,12 +11,13 @@ export const validateCreateGage = (req, res, next) => {
     !gageName ||
     !gageNumber ||
     !issueDate ||
+    !calibrationPeriod ||
     !calibrationDueDate
   ) {
     return res.status(400).json({
       success: false,
       message:
-        "Gage Name, Gage Number, Issue Date and Calibration Due Date are required",
+        "Gage Name, Gage Number, Issue Date, Calibration Period and Calibration Due Date are required",
     });
   }
 

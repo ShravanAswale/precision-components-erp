@@ -104,57 +104,61 @@ export const getDashboard = async () => {
   // Weekly Chart
   // ==========================
 
-  const today = new Date();
-  today.setHours(23, 59, 59, 999);
+  // Using UTC boundaries so they align with MongoDB's UTC-based date operators
+  const todayUTC = new Date();
+  todayUTC.setUTCHours(23, 59, 59, 999);
 
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(today.getDate() - 6);
-  sevenDaysAgo.setHours(0, 0, 0, 0);
+  const sevenDaysAgoUTC = new Date();
+  sevenDaysAgoUTC.setUTCDate(todayUTC.getUTCDate() - 6);
+  sevenDaysAgoUTC.setUTCHours(0, 0, 0, 0);
 
   const weeklyData = await Production.aggregate([
     {
       $match: {
         date: {
-          $gte: sevenDaysAgo,
-          $lte: today,
+          $gte: sevenDaysAgoUTC,
+          $lte: todayUTC,
         },
       },
     },
     {
       $group: {
         _id: {
-          $dateToString: {
-            format: "%d %b",
-            date: "$date",
-          },
+          day:   { $dayOfMonth: "$date" },
+          month: { $month: "$date" },
+          year:  { $year: "$date" },
         },
-        Production: {
-          $sum: "$actualProduction",
-        },
-        Rejection: {
-          $sum: "$rejectedQty",
-        },
+        Production: { $sum: "$actualProduction" },
+        Rejection:  { $sum: "$rejectedQty" },
       },
     },
     {
       $sort: {
-        _id: 1,
+        "_id.year": 1,
+        "_id.month": 1,
+        "_id.day": 1,
       },
     },
   ]);
+
+  // Fixed month abbreviations — avoids locale mismatch between Node.js and MongoDB %b output
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   const weeklyChart = [];
 
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
-    d.setDate(today.getDate() - i);
+    d.setUTCDate(todayUTC.getUTCDate() - i);
 
-    const label = d.toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-    });
+    // Use UTC accessors to match MongoDB's $dayOfMonth/$month/$year which always return UTC values
+    const day   = d.getUTCDate();
+    const month = d.getUTCMonth() + 1; // 1-indexed to match $month
+    const year  = d.getUTCFullYear();
+    const label = `${String(day).padStart(2, "0")} ${MONTHS[d.getUTCMonth()]}`;
 
-    const found = weeklyData.find((x) => x._id === label);
+    const found = weeklyData.find(
+      (x) => x._id.day === day && x._id.month === month && x._id.year === year
+    );
 
     weeklyChart.push({
       _id: label,

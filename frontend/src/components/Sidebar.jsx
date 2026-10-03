@@ -67,11 +67,6 @@ export default function Sidebar() {
       label: "PDIR",
     },
     {
-      to: "/challans",
-      icon: FileText,
-      label: "Challans",
-    },
-    {
       to: "/gage-management",
       icon: Wrench,
       label: "Gage Management",

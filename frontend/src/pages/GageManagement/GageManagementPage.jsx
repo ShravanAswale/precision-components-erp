@@ -43,6 +43,7 @@ export default function GageManagementPage() {
     gageNumber: "",
     issueDate: "",
     purchaseDate: "",
+    calibrationPeriod: "",
     calibrationDueDate: "",
     repairReminderDate: "",
     status: "Available",
@@ -84,6 +85,14 @@ export default function GageManagementPage() {
     setStatusFilter("All");
   };
 
+  // Calculates calibration due date by adding months to the issue date
+  const calcDueDate = (issueDate, periodMonths) => {
+    if (!issueDate || !periodMonths) return "";
+    const date = new Date(issueDate);
+    date.setMonth(date.getMonth() + Number(periodMonths));
+    return date.toISOString().split("T")[0];
+  };
+
   const openFormModal = (mode, gage = null) => {
     setModalMode(mode);
     if (gage) {
@@ -93,6 +102,7 @@ export default function GageManagementPage() {
         gageNumber: gage.gageNumber || "",
         issueDate: formatDate(gage.issueDate),
         purchaseDate: formatDate(gage.purchaseDate),
+        calibrationPeriod: gage.calibrationPeriod || "",
         calibrationDueDate: formatDate(gage.calibrationDueDate),
         repairReminderDate: formatDate(gage.repairReminderDate),
         status: gage.status || "Available",
@@ -109,6 +119,7 @@ export default function GageManagementPage() {
         gageNumber: "",
         issueDate: new Date().toISOString().split("T")[0],
         purchaseDate: "",
+        calibrationPeriod: "",
         calibrationDueDate: "",
         repairReminderDate: "",
         status: "Available",
@@ -124,7 +135,7 @@ export default function GageManagementPage() {
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     
-    // Build payload parsing optional elements perfectly
+    // Build payload — strip empty optional date strings to undefined so Mongoose doesn't cast "" as a Date
     const payload = {
       ...formData,
       purchaseDate: formData.purchaseDate || undefined,
@@ -248,6 +259,7 @@ export default function GageManagementPage() {
                 <th className="px-6 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Gage Number</th>
                 <th className="px-6 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Gage Name</th>
                 <th className="px-6 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Issue Date</th>
+                <th className="px-6 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Calibration Period</th>
                 <th className="px-6 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Calibration Due</th>
                 <th className="px-6 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
@@ -261,6 +273,7 @@ export default function GageManagementPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-teal-700">{gage.gageNumber}</td>
                     <td className="px-6 py-4 text-sm font-medium text-gray-900 max-w-xs truncate">{gage.gageName}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(gage.issueDate)}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{gage.calibrationPeriod? `${gage.calibrationPeriod} Month${gage.calibrationPeriod > 1 ? "s" : ""}` : "-"}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-amber-800">{formatDate(gage.calibrationDueDate)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <span className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${style.bg} ${style.text} ${style.border}`}>
@@ -303,16 +316,53 @@ export default function GageManagementPage() {
                   <input type="text" required value={formData.gageNumber} onChange={(e) => setFormData({ ...formData, gageNumber: e.target.value })} className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-teal-500" />
                 </div>
                 <div>
+                  {/* Re-calculates calibration due date when issue date changes */}
                   <label className="block text-sm font-medium text-gray-700 mb-1">Issue Date *</label>
-                  <input type="date" required value={formData.issueDate} onChange={(e) => setFormData({ ...formData, issueDate: e.target.value })} className="w-full px-4 py-2 border rounded-lg text-sm" />
+                  <input type="date" required value={formData.issueDate} onChange={(e) => {
+                    const newIssueDate = e.target.value;
+                    setFormData((prev) => ({
+                      ...prev,
+                      issueDate: newIssueDate,
+                      calibrationDueDate: calcDueDate(newIssueDate, prev.calibrationPeriod),
+                    }));
+                  }} className="w-full px-4 py-2 border rounded-lg text-sm" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
                   <input type="date" value={formData.purchaseDate} onChange={(e) => setFormData({ ...formData, purchaseDate: e.target.value })} className="w-full px-4 py-2 border rounded-lg text-sm" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Calibration Due Date *</label>
-                  <input type="date" required value={formData.calibrationDueDate} onChange={(e) => setFormData({ ...formData, calibrationDueDate: e.target.value })} className="w-full px-4 py-2 border rounded-lg text-sm" />
+                  {/* Selecting period auto-fills the calibration due date */}
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Calibration Period (Months) *</label>
+                  <select
+                    required
+                    value={formData.calibrationPeriod === "" ? "" : String(formData.calibrationPeriod)}
+                    onChange={(e) => {
+                      const period = Number(e.target.value);
+                      setFormData((prev) => ({
+                        ...prev,
+                        calibrationPeriod: period,
+                        calibrationDueDate: calcDueDate(prev.issueDate, period),
+                      }));
+                    }}
+                    className="w-full px-4 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value="">Select Period</option>
+                    {[1, 3, 6, 12, 18, 24, 36].map((m) => (
+                      <option key={m} value={m}>
+                        {m} {m === 1 ? "Month" : "Months"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Calibration Due Date *
+                    {formData.calibrationPeriod && formData.issueDate && (
+                      <span className="ml-2 text-xs font-normal text-teal-600">(auto-calculated)</span>
+                    )}
+                  </label>
+                  <input type="date" required value={formData.calibrationDueDate} onChange={(e) => setFormData({ ...formData, calibrationDueDate: e.target.value })} className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-teal-500" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Repair Reminder Date</label>
@@ -380,6 +430,7 @@ export default function GageManagementPage() {
               <div className="grid grid-cols-2 gap-2 text-gray-600">
                 <div><strong>Issue Date:</strong> {formatDate(selectedGage.issueDate) || "-"}</div>
                 <div><strong>Purchase Date:</strong> {formatDate(selectedGage.purchaseDate) || "-"}</div>
+                <div><strong>Calibration Period:</strong> {selectedGage.calibrationPeriod ? `${selectedGage.calibrationPeriod} Month${selectedGage.calibrationPeriod > 1 ? "s" : ""}` : "-"}</div>
                 <div><strong>Calibration Due:</strong> <span className="text-amber-700 font-semibold">{formatDate(selectedGage.calibrationDueDate)}</span></div>
                 <div><strong>Reminder Date:</strong> {formatDate(selectedGage.repairReminderDate) || "-"}</div>
                 <div><strong>Sent for Repair:</strong> {selectedGage.sentForRepair ? "Yes" : "No"}</div>

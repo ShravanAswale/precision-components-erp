@@ -52,8 +52,24 @@ const validateRejections = (data) => {
 export const createPdir = async (data, createdBy) => {
   validateRejections(data);
 
+  // Normalise checkingOperator to array before saving
+  const checkingOperator = Array.isArray(data.checkingOperator)
+    ? data.checkingOperator
+    : data.checkingOperator
+    ? [data.checkingOperator]
+    : [];
+
+  // Normalise packingOperator to array before saving
+  const packingOperator = Array.isArray(data.packingOperator)
+    ? data.packingOperator
+    : data.packingOperator
+    ? [data.packingOperator]
+    : [];
+
   const pdir = await PDIR.create({
     ...data,
+    checkingOperator,
+    packingOperator,
     createdBy,
   });
 
@@ -106,6 +122,24 @@ export const updatePdir = async (id, data) => {
   }
 
   validateRejections(data);
+
+  // Normalise checkingOperator to array on update
+  if (data.checkingOperator !== undefined) {
+    data.checkingOperator = Array.isArray(data.checkingOperator)
+      ? data.checkingOperator
+      : data.checkingOperator
+      ? [data.checkingOperator]
+      : [];
+  }
+
+  // Normalise packingOperator to array on update
+  if (data.packingOperator !== undefined) {
+    data.packingOperator = Array.isArray(data.packingOperator)
+      ? data.packingOperator
+      : data.packingOperator
+      ? [data.packingOperator]
+      : [];
+  }
 
   Object.assign(pdir, data);
 

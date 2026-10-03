@@ -44,12 +44,26 @@ export const validateCreatePdir = (req, res, next) => {
     rejections,
   } = req.body;
 
+  // Normalise checkingOperator to array — handles both single value and array sent from frontend
+  const checkingOps = Array.isArray(checkingOperator)
+    ? checkingOperator
+    : checkingOperator
+    ? [checkingOperator]
+    : [];
+
+  // Normalise packingOperator to array — same pattern as checkingOperator
+  const packingOps = Array.isArray(packingOperator)
+    ? packingOperator
+    : packingOperator
+    ? [packingOperator]
+    : [];
+
   // Required fields
   if (
     !partName ||
     !partNumber ||
-    !checkingOperator ||
-    !packingOperator ||
+    checkingOps.length === 0 ||
+    packingOps.length === 0 ||
     qtyChecked === undefined ||
     qtyChecked === null ||
     qtyChecked === ""
@@ -57,7 +71,7 @@ export const validateCreatePdir = (req, res, next) => {
     return res.status(400).json({
       success: false,
       message:
-        "Part Name, Part Number, Checking Operator, Packing Operator and Qty Checked are required",
+        "Part Name, Part Number, at least one Checking Operator, at least one Packing Operator and Qty Checked are required",
     });
   }
 

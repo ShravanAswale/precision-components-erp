@@ -24,6 +24,12 @@ const gageSchema = new mongoose.Schema(
       type: Date,
     },
 
+    calibrationPeriod: {
+      // Added to store calibration frequency in months (1, 3, 6, 12, 18, 24, 36)
+      type: Number,
+      required: true
+    },
+
     calibrationDueDate: {
       type: Date,
       required: true,

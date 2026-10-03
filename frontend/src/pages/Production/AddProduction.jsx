@@ -3,6 +3,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { calculateGrade } from "../../utils/calculateGrade";
 import api from "../../services/api";
+import SearchableSelect from "../../components/SearchableSelect";
 
 export default function AddProduction() {
   const { user } = useAuth();
@@ -40,7 +41,8 @@ export default function AddProduction() {
   const [components, setComponents] = useState([]);
 
   useEffect(() => {
-    setGrade(calculateGrade(formData.actualProd));
+    // Initial grade calculation on mount
+    setGrade(calculateGrade(formData.actualProd, formData.qtyRejected));
 
     fetchOperators();
     fetchMachines();
@@ -49,8 +51,9 @@ export default function AddProduction() {
   }, []);
 
   useEffect(() => {
-    setGrade(calculateGrade(formData.actualProd));
-  }, [formData.actualProd]);
+    // Recalculate grade whenever actual production or rejected qty changes
+    setGrade(calculateGrade(formData.actualProd, formData.qtyRejected));
+  }, [formData.actualProd, formData.qtyRejected]);
 
   const fetchOperators = async () => {
     try {
@@ -339,21 +342,19 @@ export default function AddProduction() {
               Operator Name
             </label>
 
-            <select
+            <SearchableSelect
               name="operator"
               value={formData.operator}
-              onChange={handleChange}
+              onChange={(val) =>
+                setFormData((prev) => ({ ...prev, operator: val }))
+              }
+              options={operators.map((op) => ({
+                value: op._id,
+                label: op.name,
+              }))}
+              placeholder="Select Operator"
               required
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-            >
-              <option value="">Select Operator</option>
-
-              {operators.map((op) => (
-                <option key={op._id} value={op._id}>
-                  {op.name}
-                </option>
-              ))}
-            </select>
+            />
           </div>
 
           <div>
@@ -439,21 +440,24 @@ export default function AddProduction() {
               Part Name
             </label>
 
-            <select
+            <SearchableSelect
               name="partName"
               value={formData.partName}
-              onChange={handleChange}
+              onChange={(val) => {
+                const selected = components.find((c) => c._id === val);
+                setFormData((prev) => ({
+                  ...prev,
+                  partName: val,
+                  partNo: selected?.partNumber || "",
+                }));
+              }}
+              options={components.map((c) => ({
+                value: c._id,
+                label: c.componentName,
+              }))}
+              placeholder="Select Component"
               required
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-            >
-              <option value="">Select Component</option>
-
-              {components.map((component) => (
-                <option key={component._id} value={component._id}>
-                  {component.componentName}
-                </option>
-              ))}
-            </select>
+            />
           </div>
 
           <div>

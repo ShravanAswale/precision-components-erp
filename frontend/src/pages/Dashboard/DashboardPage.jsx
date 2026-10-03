@@ -42,15 +42,10 @@ export default function DashboardPage() {
 
   const summary = dashboard?.summary || {};
 
+  // Use item._id directly — backend already sends a formatted "DD Mon" label string
   const chartData =
     dashboard?.weeklyChart?.map((item) => ({
-      name:
-        typeof item._id === "string"
-          ? new Date(item._id).toLocaleDateString("en-IN", {
-              day: "2-digit",
-              month: "short",
-            })
-          : item._id,
+      name: item._id,
       Production: item.Production || 0,
       Rejection: item.Rejection || 0,
     })) || [];

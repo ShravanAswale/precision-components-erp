@@ -119,3 +119,55 @@
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
 }
+
+/* ============================================================
+   PRINT STYLES — ensure the full report page prints completely
+   top to bottom without clipping to the visible viewport.
+   ============================================================ */
+@media print {
+  /* Remove overflow restrictions from the layout shell */
+  body,
+  #root,
+  #root > div,
+  .flex.h-screen {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Hide sidebar, header, and non-report UI */
+  .w-64,
+  header,
+  nav {
+    display: none !important;
+  }
+
+  /* Let the main content area expand to full height */
+  .flex-1.flex.flex-col.overflow-hidden,
+  main.flex-1.overflow-x-hidden.overflow-y-auto {
+    overflow: visible !important;
+    height: auto !important;
+    flex: none !important;
+  }
+
+  /* Hide print/download/filter action buttons */
+  button,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Page layout */
+  @page {
+    margin: 1.5cm;
+    size: A4 landscape;
+  }
+
+  /* Prevent tables from breaking across pages mid-row */
+  tr {
+    page-break-inside: avoid;
+  }
+
+  /* Avoid cutting section headings from their content */
+  h2, h3 {
+    page-break-after: avoid;
+  }
+}

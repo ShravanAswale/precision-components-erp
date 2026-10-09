@@ -101,30 +101,15 @@ export const getDashboard = async () => {
   });
 
   // ==========================
-  // Weekly Chart
+  // Monthly Chart (each month as one bar — all time)
   // ==========================
 
-  // Using UTC boundaries so they align with MongoDB's UTC-based date operators
-  const todayUTC = new Date();
-  todayUTC.setUTCHours(23, 59, 59, 999);
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-  const sevenDaysAgoUTC = new Date();
-  sevenDaysAgoUTC.setUTCDate(todayUTC.getUTCDate() - 6);
-  sevenDaysAgoUTC.setUTCHours(0, 0, 0, 0);
-
-  const weeklyData = await Production.aggregate([
-    {
-      $match: {
-        date: {
-          $gte: sevenDaysAgoUTC,
-          $lte: todayUTC,
-        },
-      },
-    },
+  const monthlyRawData = await Production.aggregate([
     {
       $group: {
         _id: {
-          day:   { $dayOfMonth: "$date" },
           month: { $month: "$date" },
           year:  { $year: "$date" },
         },
@@ -133,39 +118,16 @@ export const getDashboard = async () => {
       },
     },
     {
-      $sort: {
-        "_id.year": 1,
-        "_id.month": 1,
-        "_id.day": 1,
-      },
+      $sort: { "_id.year": 1, "_id.month": 1 },
     },
   ]);
 
-  // Fixed month abbreviations — avoids locale mismatch between Node.js and MongoDB %b output
-  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-  const weeklyChart = [];
-
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setUTCDate(todayUTC.getUTCDate() - i);
-
-    // Use UTC accessors to match MongoDB's $dayOfMonth/$month/$year which always return UTC values
-    const day   = d.getUTCDate();
-    const month = d.getUTCMonth() + 1; // 1-indexed to match $month
-    const year  = d.getUTCFullYear();
-    const label = `${String(day).padStart(2, "0")} ${MONTHS[d.getUTCMonth()]}`;
-
-    const found = weeklyData.find(
-      (x) => x._id.day === day && x._id.month === month && x._id.year === year
-    );
-
-    weeklyChart.push({
-      _id: label,
-      Production: found ? found.Production : 0,
-      Rejection: found ? found.Rejection : 0,
-    });
-  }
+  // Format each group as a readable month-year label
+  const monthlyChart = monthlyRawData.map((item) => ({
+    _id: `${MONTHS[item._id.month - 1]} ${item._id.year}`,
+    Production: item.Production || 0,
+    Rejection:  item.Rejection  || 0,
+  }));
 
   // ==========================
   // PDIR Analysis
@@ -207,7 +169,7 @@ export const getDashboard = async () => {
       gageRepair,
     },
     recentProduction,
-    weeklyChart,
+    monthlyChart,
     rejectionAnalysis,
     notifications,
     notificationCount,

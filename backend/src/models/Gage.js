@@ -8,10 +8,46 @@ const gageSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Short description of the gauge's purpose or type
+    description: {
+      type: String,
+      trim: true,
+    },
+
     gageNumber: {
       type: String,
       required: true,
       unique: true,
+      trim: true,
+    },
+
+    // Calibration certificate reference number
+    certificateNumber: {
+      type: String,
+      trim: true,
+    },
+
+    // Measurement range or size of the gauge (e.g. 0–150mm)
+    rangeSize: {
+      type: String,
+      trim: true,
+    },
+
+    // Part name / component this gauge is used for
+    usedForPart: {
+      type: String,
+      trim: true,
+    },
+
+    // External calibration agency name
+    agencyName: {
+      type: String,
+      trim: true,
+    },
+
+    // Location of the calibration agency
+    agencyLocation: {
+      type: String,
       trim: true,
     },
 

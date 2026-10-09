@@ -1615,11 +1615,9 @@ export default function ReportsPage() {
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
             <Info className="text-amber-600 shrink-0 mt-0.5" size={17} />
             <p className="text-xs text-amber-800">
-              This tab shows <strong>all-time</strong> data and is not affected by the
-              date range filter above. Part Wise analysis merges Production and PDIR
-              records by component, which currently happens on the backend — adding
-              accurate date filtering here needs that merge to accept a date range
-              too, so it isn't duplicated (and potentially gotten wrong) on the frontend.
+              This tab shows <strong>current month</strong> data only. Part Wise analysis merges Production and PDIR
+              records by component for the current calendar month — use the date range filter on other tabs
+              for broader historical data.
             </p>
           </div>
 

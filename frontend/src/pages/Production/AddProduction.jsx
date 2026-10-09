@@ -22,7 +22,11 @@ export default function AddProduction() {
     difference: "",
     opn: "",
     cycleTime: "",
+    cycleTimeMinutes: "",
+    cycleTimeSeconds: "",
     machineRunTime: "",
+    machineRunTimeHours: "",
+    machineRunTimeMinutes: "",
     targetProd: "",
     actualProd: "",
     qtyRejected: "0",
@@ -42,7 +46,7 @@ export default function AddProduction() {
 
   useEffect(() => {
     // Initial grade calculation on mount
-    setGrade(calculateGrade(formData.actualProd, formData.qtyRejected));
+    setGrade(calculateGrade(formData.actualProd, formData.targetProd));
 
     fetchOperators();
     fetchMachines();
@@ -51,9 +55,9 @@ export default function AddProduction() {
   }, []);
 
   useEffect(() => {
-    // Recalculate grade whenever actual production or rejected qty changes
-    setGrade(calculateGrade(formData.actualProd, formData.qtyRejected));
-  }, [formData.actualProd, formData.qtyRejected]);
+    // Recalculate grade whenever actual production or target production changes
+    setGrade(calculateGrade(formData.actualProd, formData.targetProd));
+  }, [formData.actualProd, formData.targetProd]);
 
   const fetchOperators = async () => {
     try {
@@ -130,7 +134,7 @@ export default function AddProduction() {
 
     // Step 3: Update calculation logic for target production
     if (cycleTime > 0 && machineRunTime > 0) {
-      updatedData.targetProd = ((machineRunTime * 60) / cycleTime).toFixed(2);
+      updatedData.targetProd = Math.round((machineRunTime * 60) / cycleTime);
     } else {
       updatedData.targetProd = "";
     }
@@ -391,7 +395,7 @@ export default function AddProduction() {
               <option value="">Select Shift</option>
               <option value="Morning">Morning</option>
               <option value="Evening">Evening</option>
-              <option value="Night">Night</option>
+              <option value="Night">General</option>
             </select>
           </div>
 
@@ -480,16 +484,30 @@ export default function AddProduction() {
         <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-6 pt-4 border-t border-gray-100">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Cycle Time (s)
+              Cycle Time — Minutes
             </label>
-
-            {/* Step 6: Step="0.01" added */}
             <input
               type="number"
-              step="0.01"
-              name="cycleTime"
-              value={formData.cycleTime}
-              onChange={handleChange}
+              min="0"
+              name="cycleTimeMinutes"
+              value={formData.cycleTimeMinutes}
+              onChange={(e) => {
+                const mins = e.target.value;
+                const secs = Number(formData.cycleTimeSeconds || 0);
+                const total = Number(mins || 0) + secs / 60;
+                const updatedData = {
+                  ...formData,
+                  cycleTimeMinutes: mins,
+                  cycleTime: total > 0 ? parseFloat(total.toFixed(4)) : "",
+                };
+                const machineRunTime = Number(updatedData.machineRunTime);
+                if (total > 0 && machineRunTime > 0) {
+                  updatedData.targetProd = Math.round((machineRunTime * 60) / total);
+                } else {
+                  updatedData.targetProd = "";
+                }
+                setFormData(updatedData);
+              }}
               required
               className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
@@ -497,18 +515,120 @@ export default function AddProduction() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Machine Run Time
+              Cycle Time — Seconds
             </label>
-
-            {/* Step 6: Step="0.01" added */}
             <input
               type="number"
-              step="0.01"
-              name="machineRunTime"
-              value={formData.machineRunTime}
-              onChange={handleChange}
+              min="0"
+              max="59"
+              name="cycleTimeSeconds"
+              value={formData.cycleTimeSeconds}
+              onChange={(e) => {
+                const secs = e.target.value;
+                const mins = Number(formData.cycleTimeMinutes || 0);
+                const total = mins + Number(secs || 0) / 60;
+                const updatedData = {
+                  ...formData,
+                  cycleTimeSeconds: secs,
+                  cycleTime: total > 0 ? parseFloat(total.toFixed(4)) : "",
+                };
+                const machineRunTime = Number(updatedData.machineRunTime);
+                if (total > 0 && machineRunTime > 0) {
+                  updatedData.targetProd = Math.round((machineRunTime * 60) / total);
+                } else {
+                  updatedData.targetProd = "";
+                }
+                setFormData(updatedData);
+              }}
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Cycle Time (s)
+            </label>
+            <input
+              type="number"
+              name="cycleTime"
+              value={formData.cycleTime}
+              readOnly
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg bg-gray-100 cursor-not-allowed"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Machine Run Time — Hours
+            </label>
+            <input
+              type="number"
+              min="0"
+              name="machineRunTimeHours"
+              value={formData.machineRunTimeHours}
+              onChange={(e) => {
+                const hrs = e.target.value;
+                const mins = Number(formData.machineRunTimeMinutes || 0);
+                const total = Number(hrs || 0) + mins / 60;
+                const cycleTime = Number(formData.cycleTime);
+                const updatedData = {
+                  ...formData,
+                  machineRunTimeHours: hrs,
+                  machineRunTime: total > 0 ? parseFloat(total.toFixed(4)) : "",
+                };
+                if (cycleTime > 0 && total > 0) {
+                  updatedData.targetProd = Math.round((total * 60) / cycleTime);
+                } else {
+                  updatedData.targetProd = "";
+                }
+                setFormData(updatedData);
+              }}
               required
               className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Machine Run Time — Minutes
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="59"
+              name="machineRunTimeMinutes"
+              value={formData.machineRunTimeMinutes}
+              onChange={(e) => {
+                const mins = e.target.value;
+                const hrs = Number(formData.machineRunTimeHours || 0);
+                const total = hrs + Number(mins || 0) / 60;
+                const cycleTime = Number(formData.cycleTime);
+                const updatedData = {
+                  ...formData,
+                  machineRunTimeMinutes: mins,
+                  machineRunTime: total > 0 ? parseFloat(total.toFixed(4)) : "",
+                };
+                if (cycleTime > 0 && total > 0) {
+                  updatedData.targetProd = Math.round((total * 60) / cycleTime);
+                } else {
+                  updatedData.targetProd = "";
+                }
+                setFormData(updatedData);
+              }}
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Machine Run Time (hrs)
+            </label>
+            <input
+              type="number"
+              name="machineRunTime"
+              value={formData.machineRunTime}
+              readOnly
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg bg-gray-100 cursor-not-allowed"
             />
           </div>
 
@@ -599,8 +719,7 @@ export default function AddProduction() {
             </p>
 
             <p className="text-xs text-gray-400 mt-1">
-              Based on Actual Production: &lt;60 = D, 60-69 = C,
-              70-84 = B, 85+ = A
+              Based on Efficiency %: (Actual / Target) × 100 — &lt;60 = D, 60-69 = C, 70-84 = B, 85+ = A
             </p>
           </div>
 

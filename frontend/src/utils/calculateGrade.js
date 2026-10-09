@@ -1,15 +1,15 @@
 /**
- * Grade based on accepted % = ((qtyTested - qtyRejected) / qtyTested) * 100
+ * Grade based on efficiency % = (actualProduction / targetProduction) * 100
  * A = 85%+, B = 70–84%, C = 60–69%, D = below 60%
  */
-export function calculateGrade(actualProduction, rejectedQty = 0) {
+export function calculateGrade(actualProduction, targetProduction) {
   const actual = Number(actualProduction);
-  const rejected = Number(rejectedQty || 0);
-  if (isNaN(actual) || actual <= 0) return "";
-  const acceptedPct = ((actual - rejected) / actual) * 100;
-  if (acceptedPct >= 85) return "A";
-  if (acceptedPct >= 70) return "B";
-  if (acceptedPct >= 60) return "C";
+  const target = Number(targetProduction);
+  if (isNaN(actual) || isNaN(target) || target <= 0) return "";
+  const efficiencyPct = (actual / target) * 100;
+  if (efficiencyPct >= 85) return "A";
+  if (efficiencyPct >= 70) return "B";
+  if (efficiencyPct >= 60) return "C";
   return "D";
 }
 

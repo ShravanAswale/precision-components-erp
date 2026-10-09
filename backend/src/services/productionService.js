@@ -1,15 +1,15 @@
 import Production from "../models/Production.js";
 import ApiError from "../utils/ApiError.js";
 
-// Grade based on accepted % = ((actualProduction - rejectedQty) / actualProduction) * 100
-const calculateGrade = (actualProduction, rejectedQty = 0) => {
+// Grade based on efficiency % = (actualProduction / targetProduction) * 100
+const calculateGrade = (actualProduction, targetProduction) => {
   const actual = Number(actualProduction || 0);
-  const rejected = Number(rejectedQty || 0);
-  if (actual <= 0) return "D";
-  const acceptedPct = ((actual - rejected) / actual) * 100;
-  if (acceptedPct >= 85) return "A";
-  if (acceptedPct >= 70) return "B";
-  if (acceptedPct >= 60) return "C";
+  const target = Number(targetProduction || 0);
+  if (target <= 0) return "D";
+  const efficiencyPct = (actual / target) * 100;
+  if (efficiencyPct >= 85) return "A";
+  if (efficiencyPct >= 70) return "B";
+  if (efficiencyPct >= 60) return "C";
   return "D";
 };
 
@@ -20,7 +20,7 @@ export const createProduction = async (data, createdBy) => {
     startQty: Number(data.startQty || 0),
     exitQty: Number(data.exitQty || 0),
     difference: Number(data.difference || 0),
-    grade: calculateGrade(Number(data.actualProduction || 0), Number(data.rejectedQty || 0)),
+    grade: calculateGrade(Number(data.actualProduction || 0), Number(data.targetProduction || 0)),
     createdBy,
   });
 
@@ -81,7 +81,7 @@ export const updateProduction = async (id, data) => {
   // Always recalculate grade when production is updated
   production.grade = calculateGrade(
     Number(production.actualProduction || 0),
-    Number(production.rejectedQty || 0)
+    Number(production.targetProduction || 0)
   );
 
   await production.save();

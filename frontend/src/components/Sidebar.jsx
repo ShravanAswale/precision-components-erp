@@ -69,7 +69,7 @@ export default function Sidebar() {
     {
       to: "/gage-management",
       icon: Wrench,
-      label: "Gage Management",
+      label: "Gauge Management",
     },
     {
       to: "/notifications",

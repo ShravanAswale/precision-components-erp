@@ -14,6 +14,25 @@ const safeRate = (numerator, denominator) =>
     ? Number(((numerator / denominator) * 100).toFixed(2))
     : 0;
 
+// Joins an operator field that may be a single object or an array of objects
+const formatOperatorNames = (field) => {
+  if (!field) return "-";
+  const arr = Array.isArray(field) ? field : [field];
+  const names = arr.map((op) => op?.name).filter(Boolean);
+  return names.length > 0 ? names.join(", ") : "-";
+};
+
+// Reads rejection reasons from the new rejections[] array or falls back to legacy rejectionReason field
+const formatPdirRejectionReason = (item) => {
+  if (Array.isArray(item.rejections) && item.rejections.length > 0) {
+    return item.rejections
+      .filter((r) => r.reason)
+      .map((r) => `${r.reason} (${toNum(r.qty)})`)
+      .join(", ");
+  }
+  return item.rejectionReason?.trim() || "Unspecified";
+};
+
 const getProductionRejections = (item) => {
   if (Array.isArray(item.rejections) && item.rejections.length > 0) {
     return item.rejections
@@ -192,11 +211,23 @@ export const getReports = async (query) => {
         item.component?.componentName,
         item.component?.partNumber,
 
-        item.checkingOperator?.name,
-        item.checkingOperator?.operatorId,
+        item.checkingOperator?.name ||
+          (Array.isArray(item.checkingOperator)
+            ? item.checkingOperator.map((o) => o?.name).join(" ")
+            : ""),
+        item.checkingOperator?.operatorId ||
+          (Array.isArray(item.checkingOperator)
+            ? item.checkingOperator.map((o) => o?.operatorId).join(" ")
+            : ""),
 
-        item.packingOperator?.name,
-        item.packingOperator?.operatorId,
+        item.packingOperator?.name ||
+          (Array.isArray(item.packingOperator)
+            ? item.packingOperator.map((o) => o?.name).join(" ")
+            : ""),
+        item.packingOperator?.operatorId ||
+          (Array.isArray(item.packingOperator)
+            ? item.packingOperator.map((o) => o?.operatorId).join(" ")
+            : ""),
 
         item.createdBy?.fullName,
 
@@ -568,51 +599,129 @@ export const getReports = async (query) => {
     .sort((a, b) => b.totalRejected - a.totalRejected);
 
   // =========================================================
-  // 12. PART ANALYSIS (Production & PDIR Kept Distinct)
+  // 12. PART ANALYSIS (Production & PDIR — Current Month Only)
   // =========================================================
 
-  const pdirByComponentId = new Map();
-  const pdirByPartNumber = new Map();
-  const pdirByPartName = new Map();
+  // Filter to current month so Part Wise always shows monthly data
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
-  pdirGroupList.forEach((g) => {
-    if (g.componentId) {
-      pdirByComponentId.set(g.componentId, g);
-    } else if (g.key.startsWith("pn:")) {
-      pdirByPartNumber.set(g.key.slice(3), g);
-    } else if (g.key.startsWith("name:")) {
-      pdirByPartName.set(g.key.slice(5), g);
+  const monthlyProductions = productions.filter((item) => {
+    if (!item.date) return false;
+    const d = new Date(item.date);
+    return d >= monthStart && d <= monthEnd;
+  });
+
+  const monthlyPdir = pdir.filter((item) => {
+    if (!item.createdAt) return false;
+    const d = new Date(item.createdAt);
+    return d >= monthStart && d <= monthEnd;
+  });
+
+  // Rebuild production groups using monthly data only
+  const monthlyProductionGroups = {};
+
+  monthlyProductions.forEach((item) => {
+    const componentId = item.component?._id?.toString() || "unknown";
+
+    if (!monthlyProductionGroups[componentId]) {
+      monthlyProductionGroups[componentId] = {
+        componentId: item.component?._id || null,
+        partName: item.component?.componentName || "Unknown",
+        partNumber: item.component?.partNumber || "-",
+        totalEntries: 0,
+        totalTarget: 0,
+        totalProduction: 0,
+        totalRejected: 0,
+        reasonTotals: {},
+      };
+    }
+
+    const bucket = monthlyProductionGroups[componentId];
+    bucket.totalEntries += 1;
+    bucket.totalTarget += toNum(item.targetProduction);
+    bucket.totalProduction += toNum(item.actualProduction);
+
+    const productionRejections = getProductionRejections(item);
+    const rejectionTotal = productionRejections.reduce((sum, r) => sum + r.qty, 0);
+    bucket.totalRejected += rejectionTotal > 0 ? rejectionTotal : toNum(item.rejectedQty);
+
+    productionRejections.forEach(({ reason, qty }) => {
+      bucket.reasonTotals[reason] = (bucket.reasonTotals[reason] || 0) + qty;
+    });
+  });
+
+  // Rebuild PDIR groups using monthly data only
+  const monthlyPdirGroups = {};
+
+  monthlyPdir.forEach((item) => {
+    const resolved = resolvePdirPart(item);
+    const key = resolved.key;
+
+    if (!monthlyPdirGroups[key]) {
+      monthlyPdirGroups[key] = {
+        key,
+        componentId: resolved.componentId,
+        partName: resolved.partName,
+        partNumber: resolved.partNumber,
+        totalChecked: 0,
+        totalRejected: 0,
+        pdirEntries: 0,
+        reasonTotals: {},
+      };
+    }
+
+    const bucket = monthlyPdirGroups[key];
+    bucket.totalChecked += toNum(item.qtyChecked);
+    bucket.totalRejected += toNum(item.qtyRejected);
+    bucket.pdirEntries += 1;
+
+    const rejectedQty = toNum(item.qtyRejected);
+    if (rejectedQty > 0) {
+      const reason = item.rejectionReason?.trim() || "Unspecified";
+      bucket.reasonTotals[reason] = (bucket.reasonTotals[reason] || 0) + rejectedQty;
     }
   });
 
-  const matchedPdirKeys = new Set();
+  const monthlyProductionGroupList = Object.values(monthlyProductionGroups);
+  const monthlyPdirGroupList = Object.values(monthlyPdirGroups);
 
-  const partAnalysis = productionGroupList.map((part) => {
+  const monthlyPdirByComponentId = new Map();
+  const monthlyPdirByPartNumber = new Map();
+  const monthlyPdirByPartName = new Map();
+
+  monthlyPdirGroupList.forEach((g) => {
+    if (g.componentId) {
+      monthlyPdirByComponentId.set(g.componentId, g);
+    } else if (g.key.startsWith("pn:")) {
+      monthlyPdirByPartNumber.set(g.key.slice(3), g);
+    } else if (g.key.startsWith("name:")) {
+      monthlyPdirByPartName.set(g.key.slice(5), g);
+    }
+  });
+
+  const matchedMonthlyPdirKeys = new Set();
+
+  const partAnalysis = monthlyProductionGroupList.map((part) => {
     const compId = part.componentId ? part.componentId.toString() : null;
 
     let pdirGroup = null;
 
-    if (compId && pdirByComponentId.has(compId)) {
-      pdirGroup = pdirByComponentId.get(compId);
+    if (compId && monthlyPdirByComponentId.has(compId)) {
+      pdirGroup = monthlyPdirByComponentId.get(compId);
     } else if (
-      part.partNumber &&
-      part.partNumber !== "-" &&
-      pdirByPartNumber.has(normalize(part.partNumber))
+      part.partNumber && part.partNumber !== "-" &&
+      monthlyPdirByPartNumber.has(normalize(part.partNumber))
     ) {
-      pdirGroup = pdirByPartNumber.get(normalize(part.partNumber));
-    } else if (
-      part.partName &&
-      pdirByPartName.has(normalize(part.partName))
-    ) {
-      pdirGroup = pdirByPartName.get(normalize(part.partName));
+      pdirGroup = monthlyPdirByPartNumber.get(normalize(part.partNumber));
+    } else if (part.partName && monthlyPdirByPartName.has(normalize(part.partName))) {
+      pdirGroup = monthlyPdirByPartName.get(normalize(part.partName));
     }
 
-    if (pdirGroup) matchedPdirKeys.add(pdirGroup.key);
+    if (pdirGroup) matchedMonthlyPdirKeys.add(pdirGroup.key);
 
-    const productionReasons = buildReasonBreakdown(
-      part.reasonTotals,
-      part.totalRejected
-    );
+    const productionReasons = buildReasonBreakdown(part.reasonTotals, part.totalRejected);
     const pdirReasons = pdirGroup
       ? buildReasonBreakdown(pdirGroup.reasonTotals, pdirGroup.totalRejected)
       : [];
@@ -621,7 +730,6 @@ export const getReports = async (query) => {
       componentId: part.componentId,
       partName: part.partName,
       partNumber: part.partNumber,
-
       production: {
         totalEntries: part.totalEntries,
         totalTarget: part.totalTarget,
@@ -632,103 +740,82 @@ export const getReports = async (query) => {
         mainReason: productionReasons[0]?.reason || null,
         reasons: productionReasons,
       },
-
       pdir: {
         totalChecked: pdirGroup ? pdirGroup.totalChecked : 0,
         totalRejected: pdirGroup ? pdirGroup.totalRejected : 0,
         pdirEntries: pdirGroup ? pdirGroup.pdirEntries : 0,
-        rejectionRate: pdirGroup
-          ? safeRate(pdirGroup.totalRejected, pdirGroup.totalChecked)
-          : 0,
+        rejectionRate: pdirGroup ? safeRate(pdirGroup.totalRejected, pdirGroup.totalChecked) : 0,
         mainReason: pdirReasons[0]?.reason || null,
         reasons: pdirReasons,
       },
-
       combinedRejected: part.totalRejected + (pdirGroup ? pdirGroup.totalRejected : 0),
     };
   });
 
-  // Append PDIR-only parts
-  pdirGroupList.forEach((g) => {
-    if (matchedPdirKeys.has(g.key)) return;
-
+  // Append PDIR-only parts for current month
+  monthlyPdirGroupList.forEach((g) => {
+    if (matchedMonthlyPdirKeys.has(g.key)) return;
     const pdirReasons = buildReasonBreakdown(g.reasonTotals, g.totalRejected);
-
     partAnalysis.push({
       componentId: g.componentId,
       partName: g.partName,
       partNumber: g.partNumber,
-
-      production: {
-        totalEntries: 0,
-        totalTarget: 0,
-        totalProduction: 0,
-        efficiency: 0,
-        totalRejected: 0,
-        rejectionRate: 0,
-        mainReason: null,
-        reasons: [],
-      },
-
-      pdir: {
-        totalChecked: g.totalChecked,
-        totalRejected: g.totalRejected,
-        pdirEntries: g.pdirEntries,
-        rejectionRate: safeRate(g.totalRejected, g.totalChecked),
-        mainReason: pdirReasons[0]?.reason || null,
-        reasons: pdirReasons,
-      },
-
+      production: { totalEntries: 0, totalTarget: 0, totalProduction: 0, efficiency: 0, totalRejected: 0, rejectionRate: 0, mainReason: null, reasons: [] },
+      pdir: { totalChecked: g.totalChecked, totalRejected: g.totalRejected, pdirEntries: g.pdirEntries, rejectionRate: safeRate(g.totalRejected, g.totalChecked), mainReason: pdirReasons[0]?.reason || null, reasons: pdirReasons },
       combinedRejected: g.totalRejected,
     });
   });
 
   partAnalysis.sort(
-    (a, b) =>
-      b.production.totalProduction - a.production.totalProduction ||
-      b.combinedRejected - a.combinedRejected
+    (a, b) => b.production.totalProduction - a.production.totalProduction || b.combinedRejected - a.combinedRejected
   );
 
   // =========================================================
   // 13. DETAILED PDIR REPORT
   // =========================================================
 
-  const pdirDetailedReport = pdir.map((item) => ({
-    _id: item._id,
-    createdAt: item.createdAt,
+  const pdirDetailedReport = pdir.map((item) => {
+    const formatted = {
+      _id: item._id,
+      createdAt: item.createdAt,
 
-    partName: item.component?.componentName || item.partName,
-    partNumber: item.component?.partNumber || item.partNumber,
+      partName: item.component?.componentName || item.partName,
+      partNumber: item.component?.partNumber || item.partNumber,
 
-    qtyChecked: item.qtyChecked,
-    qtyRejected: item.qtyRejected,
+      qtyChecked: item.qtyChecked,
+      qtyRejected: item.qtyRejected,
 
-    rejectionReason: item.rejectionReason || "Unspecified",
-    remarks: item.remarks || "",
+      // Format rejections[] array into a readable string for the report
+      rejectionReason: formatPdirRejectionReason(item),
+      remarks: item.remarks || "",
 
-    checkingOperator: item.checkingOperator,
-    packingOperator: item.packingOperator,
-    createdBy: item.createdBy,
+      // Format operator arrays into comma-joined name strings
+      checkingOperator: { name: formatOperatorNames(item.checkingOperator) },
+      packingOperator: { name: formatOperatorNames(item.packingOperator) },
+      createdBy: item.createdBy,
 
-    production: item.production,
+      production: item.production,
 
-    productionBatch: item.production
-      ? {
-          _id: item.production._id,
-          date: item.production.date,
-          operationNo: item.production.operationNo,
-          shift: item.production.shift,
-          operator: item.production.operator,
-          machine: item.production.machine,
-          component: item.production.component,
-          targetProduction: item.production.targetProduction,
-          actualProduction: item.production.actualProduction,
-          rejectedQty: item.production.rejectedQty,
-          rejections: item.production.rejections || [],
-          grade: item.production.grade,
-        }
-      : null,
-  }));
+      productionBatch: item.production
+        ? {
+            _id: item.production._id,
+            date: item.production.date,
+            operationNo: item.production.operationNo,
+            shift: item.production.shift,
+            operator: item.production.operator,
+            machine: item.production.machine,
+            component: item.production.component,
+            targetProduction: item.production.targetProduction,
+            actualProduction: item.production.actualProduction,
+            rejectedQty: item.production.rejectedQty,
+            rejections: item.production.rejections || [],
+            grade: item.production.grade,
+          }
+        : null,
+    };
+
+    return formatted;
+  });
 
   // =========================================================
   // 14. MONTHLY PRODUCTION CHART
